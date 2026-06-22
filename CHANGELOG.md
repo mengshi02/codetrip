@@ -23,7 +23,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Cross-Repo Groups**: Multi-repo contract matching, bridge building, and cross-repo impact analysis
 - **Wiki Generation**: LLM-augmented project documentation from the knowledge graph
 - **MCP Server**: Model Context Protocol server for AI coding agent integration
-- **Embedding Pipeline**: ONNX runtime and HTTP embedding with int8 quantization, mmap vector files, and two-stage search
+- **Embedding Pipeline**: HTTP embedding with int8 quantization, mmap vector files, and two-stage search
 - **Scalability**: Designed for 1M+ node repos — batched indexing, chunked BM25, sharded LRU cache, GC pools
 - **CLI**: Full command-line interface with 20+ subcommands
 - **Go API**: Embedded library API with extensible provider/resolver/tool registration
