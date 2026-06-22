@@ -17,15 +17,20 @@ func openTestHybrid(t *testing.T) (*HybridSearch, func()) {
 		t.Fatal(err)
 	}
 	cfg := store.DefaultConfig(filepath.Join(dir, "db"))
-	store, err := store.Open(cfg)
+	s, err := store.Open(cfg)
 	if err != nil {
 		t.Fatal(err)
 	}
-	bm25 := NewBM25Index(store, "testrepo")
+	bm25, err := NewBM25IndexWithDir(dir, "testrepo", s)
+	if err != nil {
+		s.Close()
+		os.RemoveAll(dir)
+		t.Fatal(err)
+	}
 	hs := NewHybridSearch(bm25, nil) // no vector search for unit test
 	cleanup := func() {
 		bm25.Close()
-		store.Close()
+		s.Close()
 		os.RemoveAll(dir)
 	}
 	return hs, cleanup
@@ -38,6 +43,10 @@ func TestHybridSearch_BM25Only(t *testing.T) {
 	node := graph.NewNode("testrepo", graph.LabelFunction, "searchUser").WithID("hybrid-node-1")
 	node.FilePath = "pkg/user/service.go"
 	if err := hs.bm25.IndexNode(node); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := hs.bm25.FinalizeBuild(); err != nil {
 		t.Fatal(err)
 	}
 
@@ -59,6 +68,10 @@ func TestHybridSearch_RRFScore(t *testing.T) {
 	n2 := graph.NewNode("testrepo", graph.LabelFunction, "createPayment").WithID("rrf-node-2")
 	n2.FilePath = "pkg/payment/service.go"
 	if err := hs.bm25.BatchIndex([]*graph.Node{n1, n2}); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := hs.bm25.FinalizeBuild(); err != nil {
 		t.Fatal(err)
 	}
 
@@ -86,6 +99,10 @@ func TestHybridSearch_Limit(t *testing.T) {
 		nodes[i] = graph.NewNode("testrepo", graph.LabelFunction, "func"+string(rune('A'+i)))
 	}
 	if err := hs.bm25.BatchIndex(nodes); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := hs.bm25.FinalizeBuild(); err != nil {
 		t.Fatal(err)
 	}
 

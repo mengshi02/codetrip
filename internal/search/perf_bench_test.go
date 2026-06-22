@@ -392,7 +392,10 @@ func BenchmarkPerf_BM25Search_Large(b *testing.B) {
 	}
 	defer s.Close()
 
-	idx := NewBM25Index(s, "perfrepo")
+	idx, err := NewBM25IndexWithDir(dir, "perfrepo", s)
+	if err != nil {
+		b.Fatal(err)
+	}
 	defer idx.Close()
 
 	// Index 10K nodes
@@ -404,6 +407,10 @@ func BenchmarkPerf_BM25Search_Large(b *testing.B) {
 	}
 	if err := idx.BatchIndex(nodes); err != nil {
 		b.Fatalf("BatchIndex: %v", err)
+	}
+
+	if err := idx.FinalizeBuild(); err != nil {
+		b.Fatal(err)
 	}
 
 	b.ResetTimer()
@@ -425,7 +432,7 @@ func BenchmarkPerf_BM25BatchIndex_10K(b *testing.B) {
 		cfg := store.DefaultConfig(filepath.Join(dir, "db"))
 		cfg.CacheSize = 64 << 20
 		s, _ := store.Open(cfg)
-		idx := NewBM25Index(s, "perfrepo")
+		idx, _ := NewBM25IndexWithDir(dir, "perfrepo", s)
 
 		nodes := make([]*graph.Node, 10_000)
 		for j := 0; j < 10_000; j++ {
@@ -690,7 +697,10 @@ func TestPerf_BM25_Search_Under1s(t *testing.T) {
 	s, _ := store.Open(cfg)
 	defer s.Close()
 
-	idx := NewBM25Index(s, "perfrepo")
+	idx, err := NewBM25IndexWithDir(dir, "perfrepo", s)
+	if err != nil {
+		t.Fatal(err)
+	}
 	defer idx.Close()
 
 	// Index 10K nodes
@@ -702,6 +712,10 @@ func TestPerf_BM25_Search_Under1s(t *testing.T) {
 	}
 	if err := idx.BatchIndex(nodes); err != nil {
 		t.Fatalf("BatchIndex: %v", err)
+	}
+
+	if err := idx.FinalizeBuild(); err != nil {
+		t.Fatal(err)
 	}
 
 	start := time.Now()

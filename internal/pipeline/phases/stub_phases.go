@@ -299,20 +299,28 @@ func (p *CommunitiesPhase) Run(ctx context.Context, input *pipeline.PhaseInput) 
 	result := leiden.Detect(adjGraph)
 
 	// 3. Create Community nodes and MEMBER_OF edges
+	// Map old community IDs (derived from member node IDs) to new generated IDs
+	communityIDMap := make(map[string]string, len(result.Communities))
 	for _, cn := range result.Communities {
 		commNode := graph.NewNode(input.Repo, graph.LabelCommunity, cn.HeuristicLabel).
 			WithProp("cohesion", cn.Cohesion).
 			WithProp("symbolCount", cn.SymbolCount)
-		// Use CommunityNode.ID as the node ID (it is itself a graph node ID)
-		commNode.ID = cn.ID
+		// Don't reuse cn.ID (which is a symbol node ID) — let AddNode generate a unique ID
+		// via GenerateID(repo, "Community", HeuristicLabel) to avoid overwriting symbol nodes
 		if err := input.Graph.BufferNode(commNode); err == nil {
 			nodesAdded++
 		}
+		// Map old ID → new generated ID for MEMBER_OF edge creation
+		communityIDMap[cn.ID] = commNode.ID
 	}
 
 	// Create MEMBER_OF edge for each member
 	for _, m := range result.Memberships {
-		edge := graph.NewEdge(graph.RelMemberOf, m.NodeID, m.CommunityID).
+		newCommunityID := m.CommunityID
+		if mapped, ok := communityIDMap[m.CommunityID]; ok {
+			newCommunityID = mapped
+		}
+		edge := graph.NewEdge(graph.RelMemberOf, m.NodeID, newCommunityID).
 			WithProp("confidence", 0.85)
 		if err := input.Graph.BufferEdge(edge); err == nil {
 			edgesAdded++
@@ -415,9 +423,7 @@ func (p *IndexPhase) Run(ctx context.Context, input *pipeline.PhaseInput) (*pipe
 	tripDir := input.Config.TripDir
 	bm25Index, err := search.NewBM25IndexWithDir(tripDir, input.Repo, input.Graph.Store())
 	if err != nil {
-		slog.Warn("bm25 index create failed, falling back to in-memory",
-			"repo", input.Repo, "error", err)
-		bm25Index = search.NewBM25Index(input.Graph.Store(), input.Repo)
+		return nil, fmt.Errorf("create BM25 index for repo %s: %w", input.Repo, err)
 	}
 
 	// Collect searchable nodes for batch indexing (much faster than one-by-one)

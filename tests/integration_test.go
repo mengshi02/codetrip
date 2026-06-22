@@ -2,6 +2,7 @@ package integration
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"sort"
@@ -203,7 +204,7 @@ func TestConcurrentIndexRepo(t *testing.T) {
 		wg.Add(1)
 		go func(idx int, p string) {
 			defer wg.Done()
-			_, err := trip.IndexRepo(ctx, p, codetrip.WithRepoName("concurrent-repo"))
+			_, err := trip.IndexRepo(ctx, p, codetrip.WithRepoName(fmt.Sprintf("concurrent-repo-%d", idx)))
 			if err != nil {
 				errCh <- err
 			}

@@ -43,6 +43,9 @@ func BenchmarkBM25Search(b *testing.B) {
 		n.FilePath = fmt.Sprintf("pkg/file%d.go", i)
 		idx.IndexNode(n)
 	}
+	if err := idx.FinalizeBuild(); err != nil {
+		b.Fatal(err)
+	}
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		idx.Search("searchFunc", 10)
@@ -75,14 +78,19 @@ func openTestBM25B(b *testing.B) (*BM25Index, func()) {
 		b.Fatal(err)
 	}
 	cfg := defaultCfg(dir)
-	store, err := openStore(cfg)
+	s, err := openStore(cfg)
 	if err != nil {
 		b.Fatal(err)
 	}
-	idx := NewBM25Index(store, "testrepo")
+	idx, err := NewBM25IndexWithDir(dir, "testrepo", s)
+	if err != nil {
+		s.Close()
+		rmDir(dir)
+		b.Fatal(err)
+	}
 	return idx, func() {
 		idx.Close()
-		store.Close()
+		s.Close()
 		rmDir(dir)
 	}
 }

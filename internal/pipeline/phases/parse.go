@@ -3,6 +3,7 @@ package phases
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 
@@ -72,6 +73,12 @@ func (p *ParsePhase) Run(ctx context.Context, input *pipeline.PhaseInput) (*pipe
 	nodesAdded := 0
 	edgesAdded := 0
 
+	totalSymbols := 0
+	for _, f := range input.Files {
+		totalSymbols += len(f.Symbols)
+	}
+	slog.Info("parse phase: creating graph nodes", "repo", input.Repo, "files", len(input.Files), "total_symbols", totalSymbols)
+
 	for _, f := range input.Files {
 		// Create graph node for each symbol
 		for _, sym := range f.Symbols {
@@ -87,6 +94,8 @@ func (p *ParsePhase) Run(ctx context.Context, input *pipeline.PhaseInput) (*pipe
 						edgesAdded++
 					}
 				}
+			} else {
+				slog.Warn("parse: BufferNode failed", "label", sym.Label, "name", sym.Name, "error", err)
 			}
 		}
 

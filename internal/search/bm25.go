@@ -10,8 +10,7 @@ import (
 	"time"
 
 	"github.com/blugelabs/bluge"
-	"github.com/blugelabs/bluge/analysis"
-	"github.com/blugelabs/bluge/analysis/analyzer"
+
 	"github.com/mengshi02/codetrip/internal/graph"
 	"github.com/mengshi02/codetrip/internal/store"
 )
@@ -31,26 +30,6 @@ type BM25Index struct {
 	dataDir     string
 	blugeWriter *bluge.Writer
 	mu          sync.RWMutex
-}
-
-// NewBM25Index creates a BM25 index (compatible with old interface, uses in-memory index)
-// Note: This constructor creates an in-memory index, data is not persisted
-// Recommended to use NewBM25IndexWithDir for a persistent index
-func NewBM25Index(store *store.Store, repo string) *BM25Index {
-	idx := &BM25Index{
-		store: store,
-		repo:  repo,
-	}
-
-	// Use in-memory index as compatibility solution
-	config := bluge.InMemoryOnlyConfig()
-	writer, err := bluge.OpenWriter(config)
-	if err != nil {
-		// In-memory index creation should not fail, log but don't interrupt
-		return idx
-	}
-	idx.blugeWriter = writer
-	return idx
 }
 
 // NewBM25IndexWithDir creates a persistent BM25 index using two-phase build.
@@ -112,7 +91,7 @@ func (idx *BM25Index) buildTwoPhase(dataDir, repo, buildDir, finalDir string) (*
 // If the build directory doesn't exist (index was opened directly), this is a no-op.
 func (idx *BM25Index) FinalizeBuild() error {
 	if idx.dataDir == "" {
-		return nil // in-memory index, no build to finalize
+		return nil // no dataDir configured, nothing to finalize
 	}
 
 	buildDir := filepath.Join(idx.dataDir, "index", ".build", idx.repo)
@@ -504,9 +483,4 @@ func (idx *BM25Index) documentToBluge(doc *SearchDocument) *bluge.Document {
 	}
 
 	return blugeDoc
-}
-
-// defaultAnalyzer returns the default analyzer (supports code identifiers)
-func defaultAnalyzer() *analysis.Analyzer {
-	return analyzer.NewStandardAnalyzer()
 }
