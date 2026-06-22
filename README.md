@@ -91,7 +91,7 @@ codetrip check --repo my-project --cycles
 - **Graph**: 38 node labels, typed edges, adjacency indexes
 - **Search**: Bluge BM25 + custom HNSW with int8 quantization and two-stage retrieval
 - **Parsing**: Tree-sitter with extensible language providers
-- **Embedding**: ONNX runtime / HTTP embedding pipeline with mmap quantized vectors
+- **Embedding**: HTTP embedding pipeline with mmap quantized vectors
 - **Query Engine**: Cypher AST → Volcano iterator plan with timeout protection
 - **Scalability**: Designed for 1M+ node repos (batched indexing, chunked BM25, GC pools)
 
