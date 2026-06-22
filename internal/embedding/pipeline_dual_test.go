@@ -209,7 +209,9 @@ func TestRunDualModal_MultipleNodes(t *testing.T) {
 }
 
 // TestRunDualModal_NoEmbeddableNodes verifies that RunDualModal handles
-// the case where no nodes have content.
+// the case where a node has no source content but has label/name metadata.
+// buildSynthesizedContent creates a code-like representation from node
+// properties, so such nodes are still embeddable via the synthesized fallback.
 func TestRunDualModal_NoEmbeddableNodes(t *testing.T) {
 	dir := t.TempDir()
 	s, err := store.Open(store.Config{Path: dir})
@@ -220,7 +222,7 @@ func TestRunDualModal_NoEmbeddableNodes(t *testing.T) {
 
 	gs := graph.NewGraphStore(s, "norepo")
 
-	// Add a node without content
+	// Add a node without content — but with label + name, so synthesized content is generated
 	node := &graph.Node{ID: "n1", Name: "empty", Label: graph.LabelFunction, Repo: "norepo"}
 	if err := gs.AddNode(node); err != nil {
 		t.Fatalf("add node: %v", err)
@@ -233,8 +235,8 @@ func TestRunDualModal_NoEmbeddableNodes(t *testing.T) {
 	if err != nil {
 		t.Fatalf("RunDualModal: %v", err)
 	}
-	if result.NodesEmbedded != 0 {
-		t.Errorf("NodesEmbedded = %d, want 0 for nodes without content", result.NodesEmbedded)
+	if result.NodesEmbedded != 1 {
+		t.Errorf("NodesEmbedded = %d, want 1 (synthesized content from label/name)", result.NodesEmbedded)
 	}
 }
 
