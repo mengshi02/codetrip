@@ -1,4 +1,4 @@
-# codetrip
+# codetrip [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT) [![Go Version](https://img.shields.io/badge/Go-1.26+-00ADD8?logo=go&logoColor=white)](https://go.dev/) [![Version](https://img.shields.io/badge/version-0.1.0-blue.svg)](https://github.com/mengshi02/codetrip) [![Build](https://img.shields.io/badge/build-passing-brightgreen.svg)](https://github.com/mengshi02/codetrip/actions)
 
 **Hybrid Graph-Augmented Code Intelligence Engine**
 

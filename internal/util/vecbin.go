@@ -2,6 +2,7 @@ package util
 
 import (
 	"encoding/binary"
+	"fmt"
 	"math"
 )
 
@@ -56,6 +57,14 @@ func DecodeStringList(data []byte) ([]string, error) {
 	count := int(binary.LittleEndian.Uint32(data[0:]))
 	if count == 0 {
 		return nil, nil
+	}
+	// Sanity check: count must be reasonable relative to data size.
+	// Each entry needs at least 4 bytes for the length field,
+	// so count*4+4 (header) must not exceed len(data).
+	// This prevents OOM when data is corrupted or in a wrong format
+	// (e.g. JSON) where the first 4 bytes are misinterpreted as a huge count.
+	if count*4+4 > len(data) {
+		return nil, fmt.Errorf("DecodeStringList: count %d too large for data length %d (data may be in wrong format)", count, len(data))
 	}
 	list := make([]string, 0, count)
 	off := 4

@@ -1,11 +1,11 @@
 package search
 
 import (
-	"encoding/json"
 	"fmt"
 	"testing"
 
 	"github.com/mengshi02/codetrip/internal/graph"
+	"github.com/mengshi02/codetrip/internal/util"
 )
 
 // Helper functions for test node/vector creation
@@ -45,12 +45,12 @@ func storeTestVectors(vs *VectorSearch, gs *graph.GraphStore, nodeIDs []string, 
 		for j := 0; j < dim; j++ {
 			vec[j] = float32(i*dim+j) / float32(dim*count)
 		}
-		vecData, _ := json.Marshal(vec)
+		vecData := util.EncodeFloat32Vec(vec)
 		// Write both desc and code modality vectors
 		vs.store.Set([]byte(fmt.Sprintf("embdesc:testrepo:%s", nodeIDs[i])), vecData)
 		vs.store.Set([]byte(fmt.Sprintf("embcode:testrepo:%s", nodeIDs[i])), vecData)
 	}
-	idxData, _ := json.Marshal(nodeIDs)
+	idxData := util.EncodeStringList(nodeIDs)
 	// Write both desc and code modality index keys
 	vs.store.Set([]byte("embdescidx:testrepo"), idxData)
 	vs.store.Set([]byte("embcodeidx:testrepo"), idxData)

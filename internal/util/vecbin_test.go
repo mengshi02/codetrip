@@ -81,15 +81,18 @@ func TestEncodeDecodeStringList_Empty(t *testing.T) {
 }
 
 func TestDecodeStringList_Truncated(t *testing.T) {
-	// Truncated data should return partial results without panic
+	// Truncated data should return an error without panic
 	encoded := EncodeStringList([]string{"a", "b", "c"})
 	truncated := encoded[:5] // truncate in the middle
 	decoded, err := DecodeStringList(truncated)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
+	// Should return an error (count is too large for truncated data)
+	if err == nil {
+		t.Fatal("expected error for truncated data, got nil")
 	}
-	// Should return partial results, not panic
-	_ = decoded
+	// decoded should be nil since count check fails before any items are parsed
+	if decoded != nil {
+		t.Fatalf("expected nil decoded, got %v", decoded)
+	}
 }
 
 func BenchmarkEncodeFloat32Vec_384(b *testing.B) {

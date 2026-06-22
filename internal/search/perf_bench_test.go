@@ -2,7 +2,6 @@ package search
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"math/rand"
 	"os"
@@ -14,6 +13,7 @@ import (
 	"github.com/coder/hnsw"
 	"github.com/mengshi02/codetrip/internal/graph"
 	"github.com/mengshi02/codetrip/internal/store"
+	"github.com/mengshi02/codetrip/internal/util"
 	"github.com/mengshi02/codetrip/internal/vecfile"
 )
 
@@ -83,7 +83,7 @@ func buildHNSWIndex(b *testing.B, vs *VectorSearch, gs *graph.GraphStore, s *sto
 		for j := range vec {
 			vec[j] = r.Float32()
 		}
-		vecData, _ := json.Marshal(vec)
+		vecData := util.EncodeFloat32Vec(vec)
 		descKey := graph.EmbDescKey(repo, nodeID)
 		codeKey := graph.EmbCodeKey(repo, nodeID)
 		if err := s.Set([]byte(descKey), vecData); err != nil {
@@ -97,7 +97,7 @@ func buildHNSWIndex(b *testing.B, vs *VectorSearch, gs *graph.GraphStore, s *sto
 	// Store dual-modal embedding indices
 	descIdxKey := graph.EmbDescIdxKey(repo)
 	codeIdxKey := graph.EmbCodeIdxKey(repo)
-	idxData, _ := json.Marshal(nodeIDs)
+	idxData := util.EncodeStringList(nodeIDs)
 	if err := s.Set([]byte(descIdxKey), idxData); err != nil {
 		b.Fatalf("store desc index: %v", err)
 	}
@@ -154,7 +154,7 @@ func buildHNSWIndexQuantized(b *testing.B, vs *VectorSearch, gs *graph.GraphStor
 		nodeID := fmt.Sprintf("qvecnode%d", i)
 		nodeIDs = append(nodeIDs, nodeID)
 
-		vecData, _ := json.Marshal(vecs[i])
+		vecData := util.EncodeFloat32Vec(vecs[i])
 		descKey := graph.EmbDescKey(repo, nodeID)
 		codeKey := graph.EmbCodeKey(repo, nodeID)
 		if err := s.Set([]byte(descKey), vecData); err != nil {
@@ -168,7 +168,7 @@ func buildHNSWIndexQuantized(b *testing.B, vs *VectorSearch, gs *graph.GraphStor
 	// Store dual-modal embedding indices
 	descIdxKey := graph.EmbDescIdxKey(repo)
 	codeIdxKey := graph.EmbCodeIdxKey(repo)
-	idxData, _ := json.Marshal(nodeIDs)
+	idxData := util.EncodeStringList(nodeIDs)
 	if err := s.Set([]byte(descIdxKey), idxData); err != nil {
 		b.Fatalf("store desc index: %v", err)
 	}
@@ -320,7 +320,7 @@ func BenchmarkPerf_BuildDualModalHNSWIndex(b *testing.B) {
 			for k := range vec {
 				vec[k] = r.Float32()
 			}
-			vecData, _ := json.Marshal(vec)
+			vecData := util.EncodeFloat32Vec(vec)
 			descKey := graph.EmbDescKey(repo, nodeID)
 			codeKey := graph.EmbCodeKey(repo, nodeID)
 			s.Set([]byte(descKey), vecData)
@@ -328,7 +328,7 @@ func BenchmarkPerf_BuildDualModalHNSWIndex(b *testing.B) {
 		}
 		descIdxKey := graph.EmbDescIdxKey(repo)
 		codeIdxKey := graph.EmbCodeIdxKey(repo)
-		idxData, _ := json.Marshal(nodeIDs)
+		idxData := util.EncodeStringList(nodeIDs)
 		s.Set([]byte(descIdxKey), idxData)
 		s.Set([]byte(codeIdxKey), idxData)
 		b.StartTimer()
@@ -638,7 +638,7 @@ func TestPerf_HNSW_Search_Under100ms(t *testing.T) {
 		for j := range vec {
 			vec[j] = r.Float32()
 		}
-		vecData, _ := json.Marshal(vec)
+		vecData := util.EncodeFloat32Vec(vec)
 		descKey := graph.EmbDescKey(repo, nodeID)
 		codeKey := graph.EmbCodeKey(repo, nodeID)
 		s.Set([]byte(descKey), vecData)
@@ -646,7 +646,7 @@ func TestPerf_HNSW_Search_Under100ms(t *testing.T) {
 	}
 	descIdxKey := graph.EmbDescIdxKey(repo)
 	codeIdxKey := graph.EmbCodeIdxKey(repo)
-	idxData, _ := json.Marshal(nodeIDs)
+	idxData := util.EncodeStringList(nodeIDs)
 	s.Set([]byte(descIdxKey), idxData)
 	s.Set([]byte(codeIdxKey), idxData)
 

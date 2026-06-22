@@ -2,7 +2,6 @@ package search
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"math/rand"
 	"os"
@@ -14,6 +13,7 @@ import (
 	"github.com/coder/hnsw"
 	"github.com/mengshi02/codetrip/internal/graph"
 	"github.com/mengshi02/codetrip/internal/store"
+	"github.com/mengshi02/codetrip/internal/util"
 	"github.com/mengshi02/codetrip/internal/vecfile"
 )
 
@@ -129,7 +129,7 @@ func buildDimHNSWIndex(b *testing.B, vs *VectorSearch, gs *graph.GraphStore, s *
 		nodeID := fmt.Sprintf("dim%dnode%d", dim, i)
 		nodeIDs = append(nodeIDs, nodeID)
 
-		vecData, _ := json.Marshal(vectors[i])
+		vecData := util.EncodeFloat32Vec(vectors[i])
 		descKey := graph.EmbDescKey(repo, nodeID)
 		codeKey := graph.EmbCodeKey(repo, nodeID)
 		if err := s.Set([]byte(descKey), vecData); err != nil {
@@ -142,7 +142,7 @@ func buildDimHNSWIndex(b *testing.B, vs *VectorSearch, gs *graph.GraphStore, s *
 
 	descIdxKey := graph.EmbDescIdxKey(repo)
 	codeIdxKey := graph.EmbCodeIdxKey(repo)
-	idxData, _ := json.Marshal(nodeIDs)
+	idxData := util.EncodeStringList(nodeIDs)
 	if err := s.Set([]byte(descIdxKey), idxData); err != nil {
 		b.Fatalf("store desc index: %v", err)
 	}
@@ -166,7 +166,7 @@ func buildDimHNSWIndexQuantized(b *testing.B, vs *VectorSearch, gs *graph.GraphS
 		nodeID := fmt.Sprintf("dim%dqnode%d", dim, i)
 		nodeIDs = append(nodeIDs, nodeID)
 
-		vecData, _ := json.Marshal(vectors[i])
+		vecData := util.EncodeFloat32Vec(vectors[i])
 		descKey := graph.EmbDescKey(repo, nodeID)
 		codeKey := graph.EmbCodeKey(repo, nodeID)
 		if err := s.Set([]byte(descKey), vecData); err != nil {
@@ -179,7 +179,7 @@ func buildDimHNSWIndexQuantized(b *testing.B, vs *VectorSearch, gs *graph.GraphS
 
 	descIdxKey := graph.EmbDescIdxKey(repo)
 	codeIdxKey := graph.EmbCodeIdxKey(repo)
-	idxData, _ := json.Marshal(nodeIDs)
+	idxData := util.EncodeStringList(nodeIDs)
 	if err := s.Set([]byte(descIdxKey), idxData); err != nil {
 		b.Fatalf("store desc index: %v", err)
 	}
@@ -397,7 +397,7 @@ func BenchmarkPerf_Dim384_BuildDualModalHNSW(b *testing.B) {
 		for j := 0; j < 10_000; j++ {
 			nodeID := fmt.Sprintf("build384n%d_%d", j, i)
 			nodeIDs = append(nodeIDs, nodeID)
-			vecData, _ := json.Marshal(vectors[j])
+			vecData := util.EncodeFloat32Vec(vectors[j])
 			descKey := graph.EmbDescKey(repo, nodeID)
 			codeKey := graph.EmbCodeKey(repo, nodeID)
 			s.Set([]byte(descKey), vecData)
@@ -405,7 +405,7 @@ func BenchmarkPerf_Dim384_BuildDualModalHNSW(b *testing.B) {
 		}
 		descIdxKey := graph.EmbDescIdxKey(repo)
 		codeIdxKey := graph.EmbCodeIdxKey(repo)
-		idxData, _ := json.Marshal(nodeIDs)
+		idxData := util.EncodeStringList(nodeIDs)
 		s.Set([]byte(descIdxKey), idxData)
 		s.Set([]byte(codeIdxKey), idxData)
 		b.StartTimer()
@@ -430,7 +430,7 @@ func BenchmarkPerf_Dim768_BuildDualModalHNSW(b *testing.B) {
 		for j := 0; j < 10_000; j++ {
 			nodeID := fmt.Sprintf("build768n%d_%d", j, i)
 			nodeIDs = append(nodeIDs, nodeID)
-			vecData, _ := json.Marshal(vectors[j])
+			vecData := util.EncodeFloat32Vec(vectors[j])
 			descKey := graph.EmbDescKey(repo, nodeID)
 			codeKey := graph.EmbCodeKey(repo, nodeID)
 			s.Set([]byte(descKey), vecData)
@@ -438,7 +438,7 @@ func BenchmarkPerf_Dim768_BuildDualModalHNSW(b *testing.B) {
 		}
 		descIdxKey := graph.EmbDescIdxKey(repo)
 		codeIdxKey := graph.EmbCodeIdxKey(repo)
-		idxData, _ := json.Marshal(nodeIDs)
+		idxData := util.EncodeStringList(nodeIDs)
 		s.Set([]byte(descIdxKey), idxData)
 		s.Set([]byte(codeIdxKey), idxData)
 		b.StartTimer()
@@ -463,7 +463,7 @@ func BenchmarkPerf_Dim1536_BuildDualModalHNSW(b *testing.B) {
 		for j := 0; j < 10_000; j++ {
 			nodeID := fmt.Sprintf("build1536n%d_%d", j, i)
 			nodeIDs = append(nodeIDs, nodeID)
-			vecData, _ := json.Marshal(vectors[j])
+			vecData := util.EncodeFloat32Vec(vectors[j])
 			descKey := graph.EmbDescKey(repo, nodeID)
 			codeKey := graph.EmbCodeKey(repo, nodeID)
 			s.Set([]byte(descKey), vecData)
@@ -471,7 +471,7 @@ func BenchmarkPerf_Dim1536_BuildDualModalHNSW(b *testing.B) {
 		}
 		descIdxKey := graph.EmbDescIdxKey(repo)
 		codeIdxKey := graph.EmbCodeIdxKey(repo)
-		idxData, _ := json.Marshal(nodeIDs)
+		idxData := util.EncodeStringList(nodeIDs)
 		s.Set([]byte(descIdxKey), idxData)
 		s.Set([]byte(codeIdxKey), idxData)
 		b.StartTimer()
@@ -748,7 +748,7 @@ func TestPerf_DimComprehensive(t *testing.T) {
 			for i := 0; i < 10_000; i++ {
 				nodeID := fmt.Sprintf("compnode%d", i)
 				nodeIDs = append(nodeIDs, nodeID)
-				vecData, _ := json.Marshal(vectors[i])
+				vecData := util.EncodeFloat32Vec(vectors[i])
 				descKey := graph.EmbDescKey(repo, nodeID)
 				codeKey := graph.EmbCodeKey(repo, nodeID)
 				s.Set([]byte(descKey), vecData)
@@ -756,7 +756,7 @@ func TestPerf_DimComprehensive(t *testing.T) {
 			}
 			descIdxKey := graph.EmbDescIdxKey(repo)
 			codeIdxKey := graph.EmbCodeIdxKey(repo)
-			idxData, _ := json.Marshal(nodeIDs)
+			idxData := util.EncodeStringList(nodeIDs)
 			s.Set([]byte(descIdxKey), idxData)
 			s.Set([]byte(codeIdxKey), idxData)
 
@@ -791,7 +791,7 @@ func TestPerf_DimComprehensive(t *testing.T) {
 			for i := 0; i < 10_000; i++ {
 				nodeID := fmt.Sprintf("compqnode%d", i)
 				qNodeIDs = append(qNodeIDs, nodeID)
-				vecData, _ := json.Marshal(vectors2[i])
+				vecData := util.EncodeFloat32Vec(vectors2[i])
 				descKey := graph.EmbDescKey(repo, nodeID)
 				codeKey := graph.EmbCodeKey(repo, nodeID)
 				s.Set([]byte(descKey), vecData)
@@ -799,7 +799,7 @@ func TestPerf_DimComprehensive(t *testing.T) {
 			}
 			qDescIdxKey := graph.EmbDescIdxKey(repo)
 			qCodeIdxKey := graph.EmbCodeIdxKey(repo)
-			qIdxData, _ := json.Marshal(qNodeIDs)
+			qIdxData := util.EncodeStringList(qNodeIDs)
 			s.Set([]byte(qDescIdxKey), qIdxData)
 			s.Set([]byte(qCodeIdxKey), qIdxData)
 
