@@ -24,6 +24,7 @@ func mustMarkFlagRequired(cmd *cobra.Command, flag string) {
 type cliFlags struct {
 	// Global
 	tripDir string
+	verbose bool
 
 	// Index
 	indexRepoName   string
@@ -134,6 +135,7 @@ func newRootCmd(flags *cliFlags) *cobra.Command {
 	}
 
 	cmd.PersistentFlags().StringVar(&flags.tripDir, "trip-dir", "", "Trip directory (default: ~/.codetrip)")
+	cmd.PersistentFlags().BoolVarP(&flags.verbose, "verbose", "v", false, "Enable verbose (INFO level) logging")
 
 	cmd.AddCommand(
 		newIndexCmd(flags),

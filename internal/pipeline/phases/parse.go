@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/mengshi02/codetrip/internal/graph"
 	"github.com/mengshi02/codetrip/internal/pipeline"
@@ -83,6 +84,13 @@ func (p *ParsePhase) Run(ctx context.Context, input *pipeline.PhaseInput) (*pipe
 		// Create graph node for each symbol
 		for _, sym := range f.Symbols {
 			symNode := createSymbolNode(input.Repo, sym)
+			// Store source code snippet as content for embedding and search
+			if len(f.Content) > 0 && sym.StartLine > 0 && sym.EndLine > 0 {
+				snippet := extractSnippet(f.Content, sym.StartLine, sym.EndLine)
+				if snippet != "" {
+					symNode = symNode.WithProp("content", snippet)
+				}
+			}
 			if err := input.Graph.BufferNode(symNode); err == nil {
 				sym.NodeID = symNode.ID
 				nodesAdded++
@@ -263,4 +271,36 @@ func (p *ParsePhase) Run(ctx context.Context, input *pipeline.PhaseInput) (*pipe
 		Files:        input.Files,
 		FilesUpdated: true,
 	}, nil
+}
+
+// extractSnippet extracts source code lines from content by 1-based line range.
+// Returns the text between startLine and endLine (inclusive), with leading/trailing
+// blank lines trimmed. Returns empty string if the range is invalid.
+func extractSnippet(content []byte, startLine, endLine int) string {
+	if startLine <= 0 || endLine < startLine || len(content) == 0 {
+		return ""
+	}
+	lines := strings.Split(string(content), "\n")
+	if startLine > len(lines) {
+		return ""
+	}
+	// Clamp endLine to actual line count
+	if endLine > len(lines) {
+		endLine = len(lines)
+	}
+	// Extract lines (1-based to 0-based)
+	selected := lines[startLine-1 : endLine]
+	// Trim leading and trailing blank lines
+	start := 0
+	for start < len(selected) && strings.TrimSpace(selected[start]) == "" {
+		start++
+	}
+	end := len(selected)
+	for end > start && strings.TrimSpace(selected[end-1]) == "" {
+		end--
+	}
+	if start >= end {
+		return ""
+	}
+	return strings.Join(selected[start:end], "\n")
 }

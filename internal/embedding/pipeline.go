@@ -5,6 +5,7 @@ import (
 	"crypto/sha1"
 	"fmt"
 	"log/slog"
+	"strings"
 
 	"github.com/cockroachdb/pebble/v2"
 	"github.com/coder/hnsw"
@@ -160,6 +161,79 @@ func getNodeContent(node *graph.Node) string {
 	return ""
 }
 
+// buildSynthesizedContent creates a code-like text representation from node
+// properties when no actual source content is available. This allows embedding
+// even when the indexing pipeline did not store source code content.
+func buildSynthesizedContent(node *graph.Node) string {
+	var b strings.Builder
+
+	// Signature line (e.g. "func processOrder(order Order) error")
+	b.WriteString(buildNodeSignature(node))
+	b.WriteByte('\n')
+
+	// File location
+	if node.FilePath != "" {
+		startLine := node.GetPropInt("startLine")
+		endLine := node.GetPropInt("endLine")
+		if startLine > 0 && endLine > 0 {
+			fmt.Fprintf(&b, "// File: %s:%d-%d\n", node.FilePath, startLine, endLine)
+		} else if startLine > 0 {
+			fmt.Fprintf(&b, "// File: %s:%d\n", node.FilePath, startLine)
+		} else {
+			fmt.Fprintf(&b, "// File: %s\n", node.FilePath)
+		}
+	}
+
+	// Visibility
+	if v, ok := node.Props.GetProp("visibility"); ok {
+		fmt.Fprintf(&b, "// Visibility: %v\n", v)
+	}
+
+	// Qualified name
+	if v, ok := node.Props.GetProp("qualifiedName"); ok {
+		fmt.Fprintf(&b, "// Qualified: %v\n", v)
+	}
+
+	// Description (doc comments)
+	if v, ok := node.Props.GetProp("description"); ok {
+		if s, ok := v.(string); ok && s != "" {
+			fmt.Fprintf(&b, "// %s\n", s)
+		}
+	}
+
+	// Return type
+	if v, ok := node.Props.GetProp("returnType"); ok {
+		fmt.Fprintf(&b, "// Returns: %v\n", v)
+	}
+
+	// Base types (for classes/interfaces)
+	if v, ok := node.Props.GetProp("baseTypes"); ok {
+		if sl, ok := v.([]string); ok && len(sl) > 0 {
+			fmt.Fprintf(&b, "// Extends/Implements: %s\n", strings.Join(sl, ", "))
+		}
+	}
+
+	// Receiver (for methods)
+	if v, ok := node.Props.GetProp("receiver"); ok {
+		fmt.Fprintf(&b, "// Receiver: %v\n", v)
+	}
+
+	// Annotations/decorators
+	if v, ok := node.Props.GetProp("annotations"); ok {
+		if sl, ok := v.([]string); ok && len(sl) > 0 {
+			for _, a := range sl {
+				fmt.Fprintf(&b, "@%s\n", a)
+			}
+		}
+	}
+
+	result := b.String()
+	if len(result) <= 1 { // just a newline
+		return ""
+	}
+	return result
+}
+
 // RunDualModal executes the dual-modal embedding pipeline:
 // iterate nodes → generate description + code text → embed → store vectors.
 // This is the primary embedding method, replacing the old single-modal Run().
@@ -167,7 +241,12 @@ func (p *EmbeddingPipeline) RunDualModal(ctx context.Context, repo string, incre
 	result := &PipelineResult{}
 
 	// Check if embedder is available — return empty result silently (no error)
-	if p.embedder == nil || p.embedder.Dimensions() == 0 {
+	if p.embedder == nil {
+		slog.Warn("embed: embedder is nil, skipping embedding")
+		return result, nil
+	}
+	if p.embedder.Dimensions() == 0 {
+		slog.Warn("embed: embedder dimensions is 0, skipping embedding (specify --dimensions or use an endpoint that supports auto-detect)")
 		return result, nil
 	}
 
@@ -179,18 +258,30 @@ func (p *EmbeddingPipeline) RunDualModal(ctx context.Context, repo string, incre
 
 	// Iterate all nodes in graph, collect embeddable nodes
 	var nodes []embedNode
+	var totalIterated int
+	var labelSkipped int
+	var contentSkipped int
+	skippedLabels := make(map[graph.Label]int)
 	iter := p.graph.IterNodes(repo)
 	defer iter.Close()
 
 	for iter.Next() {
+		totalIterated++
 		node := iter.Node()
 		if !embeddableLabels[node.Label] {
+			labelSkipped++
+			skippedLabels[node.Label]++
 			continue
 		}
 
-		// Get code content
+		// Get code content: prefer actual source content, fallback to signature
 		content := getNodeContent(node)
 		if content == "" {
+			// No source content stored — synthesize from node properties
+			content = buildSynthesizedContent(node)
+		}
+		if content == "" {
+			contentSkipped++
 			continue
 		}
 
@@ -226,6 +317,19 @@ func (p *EmbeddingPipeline) RunDualModal(ctx context.Context, repo string, incre
 	}
 
 	if len(nodes) == 0 {
+		// Log skipped label details
+		topSkipped := make([]string, 0, 5)
+		for lbl, cnt := range skippedLabels {
+			topSkipped = append(topSkipped, fmt.Sprintf("%s=%d", lbl, cnt))
+		}
+		slog.Info("embed: no embeddable nodes found",
+			"repo", repo,
+			"total_iterated", totalIterated,
+			"label_skipped", labelSkipped,
+			"content_skipped", contentSkipped,
+			"skipped_incremental", result.Skipped,
+			"top_skipped_labels", topSkipped,
+		)
 		return result, nil
 	}
 

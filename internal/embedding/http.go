@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"sync"
 	"time"
@@ -55,6 +56,28 @@ func (e *HTTPEmbedder) WithStore(store *store.Store) *HTTPEmbedder {
 // Dimensions returns vector dimensions
 func (e *HTTPEmbedder) Dimensions() int {
 	return e.dimensions
+}
+
+// DetectDimensions probes the embedding endpoint with a sample text
+// to auto-detect the vector dimensions. Sets e.dimensions if successful.
+func (e *HTTPEmbedder) DetectDimensions(ctx context.Context) error {
+	if e.dimensions > 0 {
+		return nil // already known
+	}
+
+	slog.Info("embed: auto-detecting dimensions from endpoint", "endpoint", e.endpoint)
+
+	results, err := e.Embed(ctx, []string{"test"})
+	if err != nil {
+		return fmt.Errorf("detect dimensions: probe request failed: %w", err)
+	}
+	if len(results) == 0 || len(results[0]) == 0 {
+		return fmt.Errorf("detect dimensions: endpoint returned empty embedding")
+	}
+
+	e.dimensions = len(results[0])
+	slog.Info("embed: auto-detected dimensions", "dimensions", e.dimensions)
+	return nil
 }
 
 // embedRequest is an OpenAI compatible embedding request

@@ -1231,17 +1231,20 @@ func (trip *Trip) getVectorSearch(repo string) (*search.VectorSearch, error) {
 		return vs, nil
 	}
 
+	// Pre-resolve GraphStore BEFORE acquiring write lock to avoid deadlock:
+	// GraphStore() acquires trip.mu.RLock(), which would deadlock if we
+	// already hold trip.mu.Lock() (Go's RWMutex is not reentrant).
+	gs := trip.GraphStore(repo)
+	if gs == nil {
+		return nil, fmt.Errorf("%w: %s", ErrRepoNotFound, repo)
+	}
+
 	trip.mu.Lock()
 	defer trip.mu.Unlock()
 
 	// Double check
 	if vs, ok := trip.vectorSearches[repo]; ok {
 		return vs, nil
-	}
-
-	gs := trip.GraphStore(repo)
-	if gs == nil {
-		return nil, fmt.Errorf("%w: %s", ErrRepoNotFound, repo)
 	}
 
 	// Create VectorSearch with dataDir for HNSW persistence
@@ -1256,8 +1259,6 @@ func (trip *Trip) getVectorSearch(repo string) (*search.VectorSearch, error) {
 		}
 	}
 	// Try to restore HNSW index from disk
-	vs.RestoreDualHNSWIndex()
-	// Try to restore dual-modal HNSW indices from disk
 	vs.RestoreDualHNSWIndex()
 	// Set embedder if available
 	if trip.hasRealEmbedder() {
@@ -1312,6 +1313,13 @@ func (trip *Trip) EmbedRepo(ctx context.Context, repo string, opts ...EmbedOptio
 	)
 	httpEmbedder.WithStore(trip.store)
 
+	// Auto-detect dimensions if not specified
+	if embedOpts.dimensions == 0 {
+		if err := httpEmbedder.DetectDimensions(ctx); err != nil {
+			return nil, fmt.Errorf("embed: failed to auto-detect dimensions from endpoint: %w", err)
+		}
+	}
+
 	// Update trip.embedder for future searches
 	trip.mu.Lock()
 	trip.embedder = httpEmbedderAdapter{httpEmbedder}
@@ -1322,6 +1330,9 @@ func (trip *Trip) EmbedRepo(ctx context.Context, repo string, opts ...EmbedOptio
 	embedConfig.BatchSize = embedOpts.batchSize
 	if embedOpts.dimensions > 0 {
 		embedConfig.Dimensions = embedOpts.dimensions
+	} else {
+		// Use auto-detected dimensions from HTTPEmbedder
+		embedConfig.Dimensions = httpEmbedder.Dimensions()
 	}
 
 	ep := embedding.NewEmbeddingPipelineWithDir(
@@ -2446,12 +2457,12 @@ type IndexResult struct {
 
 // ReIndexResult represents incremental re-indexing result
 type ReIndexResult struct {
-	Repo       string
-	Added      int
-	Modified   int
-	Deleted    int
-	Unchanged  int
-	Duration   float64 // seconds
+	Repo      string
+	Added     int
+	Modified  int
+	Deleted   int
+	Unchanged int
+	Duration  float64 // seconds
 }
 
 // EmbedResult represents dual-modal embedding result

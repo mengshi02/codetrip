@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"sync"
 	"unsafe"
+
+	mmap "github.com/blevesearch/mmap-go"
 )
 
 // VectorFile implements a memory-mapped file for storing quantized vectors.
@@ -148,6 +150,7 @@ type VectorFileReader struct {
 	chunkOff int // byte offset where chunk vectors start
 	dim      int
 	path     string
+	mmapData mmap.MMap // underlying mmap handle for unmap
 }
 
 // OpenVectorFile opens and memory-maps a quantized vector file.
@@ -196,14 +199,14 @@ func OpenVectorFile(path string) (*VectorFileReader, error) {
 	nodeOff := VecHeaderSize + tableSize*2
 	chunkOff := nodeOff + int(header.NodeCount)*dim
 
-	// mmap the file
-	data, err := mmapFile(int(f.Fd()), size)
+	// mmap the file using mmap-go (cross-platform)
+	data, err := mmap.Map(f, mmap.RDONLY, 0)
 	if err != nil {
 		return nil, fmt.Errorf("mmap vector file: %w", err)
 	}
 
 	return &VectorFileReader{
-		data:     data,
+		data:     []byte(data),
 		size:     size,
 		header:   header,
 		scale:    scale,
@@ -212,6 +215,7 @@ func OpenVectorFile(path string) (*VectorFileReader, error) {
 		chunkOff: chunkOff,
 		dim:      dim,
 		path:     path,
+		mmapData: data,
 	}, nil
 }
 
@@ -219,9 +223,10 @@ func OpenVectorFile(path string) (*VectorFileReader, error) {
 func (r *VectorFileReader) Close() error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if r.data != nil {
-		err := munmapFile(r.data)
+	if r.mmapData != nil {
+		err := r.mmapData.Unmap()
 		r.data = nil
+		r.mmapData = nil
 		return err
 	}
 	return nil

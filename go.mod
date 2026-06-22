@@ -3,6 +3,7 @@ module github.com/mengshi02/codetrip
 go 1.26.4
 
 require (
+	github.com/blevesearch/mmap-go v1.2.0
 	github.com/blugelabs/bluge v0.2.2
 	github.com/cockroachdb/pebble/v2 v2.1.6
 	github.com/coder/hnsw v0.6.1
@@ -20,7 +21,6 @@ require (
 	github.com/axiomhq/hyperloglog v0.0.0-20191112132149-a4c4c47bc57f // indirect
 	github.com/bits-and-blooms/bitset v1.24.2 // indirect
 	github.com/blevesearch/go-porterstemmer v1.0.3 // indirect
-	github.com/blevesearch/mmap-go v1.2.0 // indirect
 	github.com/blevesearch/segment v0.9.1 // indirect
 	github.com/blevesearch/snowballstem v0.9.0 // indirect
 	github.com/blevesearch/vellum v1.2.0 // indirect
