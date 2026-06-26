@@ -6,7 +6,7 @@ import (
 	"strings"
 
 	"github.com/mengshi02/codetrip/internal/graph"
-	"github.com/mengshi02/codetrip/internal/pipeline"
+	"github.com/mengshi02/codetrip/internal/collection"
 )
 
 // LaravelRouteExtractor Laravel route extractor
@@ -18,7 +18,7 @@ type LaravelRouteExtractor struct{}
 func (e *LaravelRouteExtractor) Framework() string { return "laravel" }
 
 // Extract implements RouteExtractor
-func (e *LaravelRouteExtractor) Extract(ctx context.Context, g *graph.GraphStore, files []*pipeline.ParsedFile) ([]*Route, error) {
+func (e *LaravelRouteExtractor) Extract(ctx context.Context, g *graph.GraphStore, files []*collection.ParsedFile) ([]*Route, error) {
 	slice := acquireRouteSlice()
 	defer releaseRouteSlice(slice)
 
@@ -42,7 +42,7 @@ func (e *LaravelRouteExtractor) Extract(ctx context.Context, g *graph.GraphStore
 	return result, nil
 }
 
-func (e *LaravelRouteExtractor) extractFromFile(f *pipeline.ParsedFile, g *graph.GraphStore) []*Route {
+func (e *LaravelRouteExtractor) extractFromFile(f *collection.ParsedFile, g *graph.GraphStore) []*Route {
 	var routes []*Route
 
 	// Extract Route::get/post/put/delete/patch from call sites
@@ -93,7 +93,7 @@ type laravelRouteCallInfo struct {
 }
 
 // parseLaravelRouteCall parses Laravel route from call site
-func parseLaravelRouteCall(call *pipeline.CallSite) *laravelRouteCallInfo {
+func parseLaravelRouteCall(call *collection.CallSite) *laravelRouteCallInfo {
 	// Route::get('/path', [Controller::class, 'method'])
 	// Route::post('/path', 'Controller@method')
 	// Route::middleware(['auth'])->get('/path', ...)
@@ -140,7 +140,7 @@ func laravelMethodFromCall(name string) string {
 }
 
 // findHandlerNodeID finds the node ID for Laravel controller method
-func findHandlerNodeID(f *pipeline.ParsedFile, handlerName string, g *graph.GraphStore) string {
+func findHandlerNodeID(f *collection.ParsedFile, handlerName string, g *graph.GraphStore) string {
 	if handlerName == "" {
 		return ""
 	}

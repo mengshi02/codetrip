@@ -10,7 +10,7 @@ import (
 	"time"
 
 	"github.com/mengshi02/codetrip"
-	"github.com/mengshi02/codetrip/internal/pipeline"
+	"github.com/mengshi02/codetrip/internal/collection"
 )
 
 // ============ Helper: rich test repo with diverse content ============
@@ -221,7 +221,7 @@ func TestE2E_DropIndex_Completeness(t *testing.T) {
 	}
 
 	// Verify search returns results before drop
-	searchResult, err := trip1.Search(ctx, &pipeline.SearchRequest{
+	searchResult, err := trip1.Search(ctx, &collection.SearchRequest{
 		Query: "DatabaseConnection",
 		Repo:  "dropcompleteness",
 		Limit: 10,
@@ -285,7 +285,7 @@ func TestE2E_DropIndex_Completeness(t *testing.T) {
 	}
 
 	// Check 5: Search must return error or no results for dropped repo
-	searchResult2, err := trip2.Search(ctx, &pipeline.SearchRequest{
+	searchResult2, err := trip2.Search(ctx, &collection.SearchRequest{
 		Query: "DatabaseConnection",
 		Repo:  "dropcompleteness",
 		Limit: 10,
@@ -320,7 +320,7 @@ func TestE2E_DropIndex_ThenReindex(t *testing.T) {
 	t.Logf("first index: nodes=%d files=%d", result1.Nodes, result1.Files)
 
 	// Search
-	sr1, err := trip.Search(ctx, &pipeline.SearchRequest{
+	sr1, err := trip.Search(ctx, &collection.SearchRequest{
 		Query: "UserService",
 		Repo:  "reindextest",
 		Limit: 10,
@@ -346,7 +346,7 @@ func TestE2E_DropIndex_ThenReindex(t *testing.T) {
 	t.Logf("second index: nodes=%d files=%d", result2.Nodes, result2.Files)
 
 	// Search again — should return results
-	sr2, err := trip.Search(ctx, &pipeline.SearchRequest{
+	sr2, err := trip.Search(ctx, &collection.SearchRequest{
 		Query: "UserService",
 		Repo:  "reindextest",
 		Limit: 10,
@@ -374,7 +374,7 @@ func TestE2E_Search_ResultQuality_SymbolTypes(t *testing.T) {
 	}
 
 	// Search for "DatabaseConnection" — should return struct, method, constructor, not just file
-	sr, err := trip.Search(ctx, &pipeline.SearchRequest{
+	sr, err := trip.Search(ctx, &collection.SearchRequest{
 		Query: "DatabaseConnection",
 		Repo:  "searchquality",
 		Limit: 20,
@@ -477,7 +477,7 @@ func TestE2E_Search_SymbolTypes(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.query, func(t *testing.T) {
-			sr, err := trip.Search(ctx, &pipeline.SearchRequest{
+			sr, err := trip.Search(ctx, &collection.SearchRequest{
 				Query: tc.query,
 				Repo:  "symboltype",
 				Limit: 20,
@@ -526,7 +526,7 @@ func TestE2E_Search_ResultHasLocationInfo(t *testing.T) {
 		t.Fatalf("index repo: %v", err)
 	}
 
-	sr, err := trip.Search(ctx, &pipeline.SearchRequest{
+	sr, err := trip.Search(ctx, &collection.SearchRequest{
 		Query: "DatabaseConnection",
 		Repo:  "locationtest",
 		Limit: 20,
@@ -587,7 +587,7 @@ func TestE2E_Search_AfterCrashRecovery(t *testing.T) {
 	}
 	defer trip2.Close()
 
-	sr, err := trip2.Search(ctx, &pipeline.SearchRequest{
+	sr, err := trip2.Search(ctx, &collection.SearchRequest{
 		Query: "UserService",
 		Repo:  "crashsearch",
 		Limit: 10,
@@ -670,7 +670,7 @@ func TestE2E_DropIndex_AfterCrashRecovery(t *testing.T) {
 	}
 
 	// Search should not find results
-	sr, err := trip3.Search(ctx, &pipeline.SearchRequest{
+	sr, err := trip3.Search(ctx, &collection.SearchRequest{
 		Query: "UserService",
 		Repo:  "crashdrop",
 		Limit: 10,
@@ -702,7 +702,7 @@ func TestE2E_Search_MultiRepoIsolation(t *testing.T) {
 	}
 
 	// Search in repoA should not return results from repoB
-	srA, err := trip.Search(ctx, &pipeline.SearchRequest{
+	srA, err := trip.Search(ctx, &collection.SearchRequest{
 		Query: "DatabaseConnection",
 		Repo:  "repoA",
 		Limit: 20,
@@ -723,7 +723,7 @@ func TestE2E_Search_MultiRepoIsolation(t *testing.T) {
 		t.Fatalf("drop repoA: %v", err)
 	}
 
-	srB, err := trip.Search(ctx, &pipeline.SearchRequest{
+	srB, err := trip.Search(ctx, &collection.SearchRequest{
 		Query: "DatabaseConnection",
 		Repo:  "repoB",
 		Limit: 20,
@@ -750,7 +750,7 @@ func TestE2E_DropIndex_SearchReturnsNoResults(t *testing.T) {
 	}
 
 	// Confirm search works
-	sr1, err := trip.Search(ctx, &pipeline.SearchRequest{
+	sr1, err := trip.Search(ctx, &collection.SearchRequest{
 		Query: "HTTPHandler",
 		Repo:  "dropsearch",
 		Limit: 10,
@@ -768,7 +768,7 @@ func TestE2E_DropIndex_SearchReturnsNoResults(t *testing.T) {
 	}
 
 	// Search must fail or return empty
-	sr2, err := trip.Search(ctx, &pipeline.SearchRequest{
+	sr2, err := trip.Search(ctx, &collection.SearchRequest{
 		Query: "HTTPHandler",
 		Repo:  "dropsearch",
 		Limit: 10,
@@ -797,7 +797,7 @@ func TestE2E_Search_ScoreRelevance(t *testing.T) {
 	}
 
 	// Search for exact symbol name — name match should have high score
-	sr, err := trip.Search(ctx, &pipeline.SearchRequest{
+	sr, err := trip.Search(ctx, &collection.SearchRequest{
 		Query: "DatabaseConnection",
 		Repo:  "relevance",
 		Limit: 10,
@@ -844,7 +844,7 @@ func TestE2E_FullPipeline_IndexSearchDropReindexSearch(t *testing.T) {
 	// Step 2: Search — use queries that are known to work with Go provider
 	searchQueries := []string{"DatabaseConnection", "UserService", "Connect"}
 	for _, q := range searchQueries {
-		sr, err := trip.Search(ctx, &pipeline.SearchRequest{
+		sr, err := trip.Search(ctx, &collection.SearchRequest{
 			Query: q,
 			Repo:  "fullpipeline",
 			Limit: 10,
@@ -869,7 +869,7 @@ func TestE2E_FullPipeline_IndexSearchDropReindexSearch(t *testing.T) {
 
 	// Verify search returns nothing
 	for _, q := range searchQueries {
-		sr, err := trip.Search(ctx, &pipeline.SearchRequest{
+		sr, err := trip.Search(ctx, &collection.SearchRequest{
 			Query: q,
 			Repo:  "fullpipeline",
 			Limit: 10,
@@ -889,7 +889,7 @@ func TestE2E_FullPipeline_IndexSearchDropReindexSearch(t *testing.T) {
 
 	// Step 5: Search again — all queries should return results
 	for _, q := range searchQueries {
-		sr, err := trip.Search(ctx, &pipeline.SearchRequest{
+		sr, err := trip.Search(ctx, &collection.SearchRequest{
 			Query: q,
 			Repo:  "fullpipeline",
 			Limit: 10,
@@ -920,7 +920,7 @@ func TestE2E_Search_ContainsFilesAndSymbols(t *testing.T) {
 	}
 
 	// Search broadly — should match both files and code symbols
-	sr, err := trip.Search(ctx, &pipeline.SearchRequest{
+	sr, err := trip.Search(ctx, &collection.SearchRequest{
 		Query: "service",
 		Repo:  "fileandsymbols",
 		Limit: 30,

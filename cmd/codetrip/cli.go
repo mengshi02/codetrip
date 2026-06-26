@@ -33,12 +33,12 @@ type cliFlags struct {
 	indexWithCFG    bool
 	indexWithPDG    bool
 
-	// Query
-	queryRepo string
 
 	// Impact
-	impactDirection string
-	impactMaxDepth  int
+	impactDirection   string
+	impactMaxDepth    int
+	impactGranularity string
+	impactEdgeFilter  string
 
 	// Context
 	contextFile string
@@ -100,6 +100,8 @@ func newCLIFlags() *cliFlags {
 		indexByteBudget:      20 << 20,
 		impactDirection:      "downstream",
 		impactMaxDepth:       3,
+		impactGranularity:    "summary",
+		impactEdgeFilter:     "all",
 		searchLimit:          20,
 		renameDryRun:         true,
 		explainLimit:         100,
@@ -127,8 +129,6 @@ func newRootCmd(flags *cliFlags) *cobra.Command {
 		Example: `  # Index a repository
   codetrip index /path/to/my-project
 
-  # Query with Cypher
-  codetrip query "MATCH (n:Function) RETURN n.name LIMIT 10" --repo redis
 
   # Analyze impact of a symbol change
   codetrip impact User --repo redis --direction upstream --max-depth 5`,
@@ -140,7 +140,6 @@ func newRootCmd(flags *cliFlags) *cobra.Command {
 	cmd.AddCommand(
 		newIndexCmd(flags),
 		newReIndexCmd(flags),
-		newQueryCmd(flags),
 		newInfoCmd(flags),
 		newVersionCmd(),
 		newImpactCmd(flags),
@@ -243,63 +242,6 @@ func newIndexCmd(flags *cliFlags) *cobra.Command {
 	return cmd
 }
 
-// ============ Query Command ============
-
-func newQueryCmd(flags *cliFlags) *cobra.Command {
-	cmd := &cobra.Command{
-		Use:   "query <cypher-query>",
-		Short: "Execute a Cypher query",
-		Long:  "Execute a Cypher query against the specified repository.",
-		Example: `  # List all function names
-  codetrip query "MATCH (n:Function) RETURN n.name LIMIT 10" --repo redis
-
-  # Find call relationships
-  codetrip query "MATCH (a)-[:CALLS]->(b) WHERE a.name = 'handleRequest' RETURN b.name" --repo my-project`,
-		Args: cobra.ExactArgs(1),
-		RunE: func(cmd *cobra.Command, args []string) error {
-			queryStr := args[0]
-
-			trip, err := flags.openTripForRepo(flags.queryRepo)
-			if err != nil {
-				return err
-			}
-			defer trip.Close()
-
-			ctx := context.Background()
-			result, err := utils.Query(ctx, trip, queryStr, flags.queryRepo)
-			if err != nil {
-				return err
-			}
-
-			if len(result.Rows) == 0 {
-				fmt.Println("(no results)")
-				return nil
-			}
-
-			if len(result.Columns) > 0 {
-				fmt.Println(strings.Join(result.Columns, "\t"))
-				fmt.Println(strings.Repeat("-", 40))
-			}
-
-			for _, row := range result.Rows {
-				vals := make([]string, 0, len(result.Columns))
-				for _, col := range result.Columns {
-					v := row[col]
-					vals = append(vals, utils.FormatValue(v))
-				}
-				fmt.Println(strings.Join(vals, "\t"))
-			}
-
-			fmt.Printf("\n(%d rows)\n", len(result.Rows))
-			return nil
-		},
-	}
-
-	cmd.Flags().StringVar(&flags.queryRepo, "repo", "", "Repository name (required)")
-	mustMarkFlagRequired(cmd, "repo")
-
-	return cmd
-}
 
 // ============ Search Command ============
 
@@ -484,10 +426,12 @@ func newImpactCmd(flags *cliFlags) *cobra.Command {
 
 			ctx := context.Background()
 			req := &codetrip.ImpactRequest{
-				Target:    target,
-				Repo:      flags.commonRepo,
-				Direction: flags.impactDirection,
-				MaxDepth:  flags.impactMaxDepth,
+				Target:      target,
+				Repo:        flags.commonRepo,
+				Direction:   flags.impactDirection,
+				MaxDepth:    flags.impactMaxDepth,
+				Granularity: flags.impactGranularity,
+				EdgeFilter:  flags.impactEdgeFilter,
 			}
 
 			result, err := utils.Impact(ctx, trip, req)
@@ -518,7 +462,32 @@ func newImpactCmd(flags *cliFlags) *cobra.Command {
 					if fp == "" {
 						fp = "<no file>"
 					}
-					fmt.Printf("    - %s (%s) in %s\n", name, sym.Kind, fp)
+					extra := ""
+					if sym.Line > 0 {
+						extra = fmt.Sprintf(":%d", sym.Line)
+					}
+					if sym.RelationType != "" {
+						extra += fmt.Sprintf(" via %s", sym.RelationType)
+					}
+					fmt.Printf("    - %s (%s) in %s%s\n", name, sym.Kind, fp, extra)
+				}
+			}
+
+			// Print path-level detail for granularity=path
+			if flags.impactGranularity == "path" && len(result.Paths) > 0 {
+				fmt.Printf("\n  Traversal Paths (%d):\n", len(result.Paths))
+				for i, p := range result.Paths {
+					fmt.Printf("    Path %d: ", i+1)
+					for j, hop := range p.Hops {
+						if j > 0 {
+							fmt.Printf(" --[%s]--> ", hop.RelationType)
+						}
+						fmt.Printf("%s", hop.Name)
+						if hop.Line > 0 {
+							fmt.Printf(":%d", hop.Line)
+						}
+					}
+					fmt.Println()
 				}
 			}
 			return nil
@@ -527,6 +496,8 @@ func newImpactCmd(flags *cliFlags) *cobra.Command {
 
 	cmd.Flags().StringVar(&flags.impactDirection, "direction", "downstream", "Traversal direction: downstream or upstream")
 	cmd.Flags().IntVar(&flags.impactMaxDepth, "max-depth", 3, "Maximum traversal depth")
+	cmd.Flags().StringVar(&flags.impactGranularity, "granularity", "summary", "Output granularity: summary, symbol, or path")
+	cmd.Flags().StringVar(&flags.impactEdgeFilter, "edge-filter", "all", "Edge type filter: all, calls_only, or semantic")
 	cmd.Flags().StringVar(&flags.commonRepo, "repo", "", "Repository name (required)")
 	mustMarkFlagRequired(cmd, "repo")
 

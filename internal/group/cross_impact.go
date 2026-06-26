@@ -6,13 +6,13 @@ import (
 	"strings"
 
 	"github.com/mengshi02/codetrip/internal/graph"
-	"github.com/mengshi02/codetrip/internal/pipeline"
+	"github.com/mengshi02/codetrip/internal/collection"
 )
 
 // CrossRepoImpactResult is the cross-repo impact analysis result
 type CrossRepoImpactResult struct {
 	Risk          string                    `json:"risk"`
-	LocalImpact   *pipeline.ImpactResult    `json:"localImpact"`
+	LocalImpact   *collection.ImpactResult    `json:"localImpact"`
 	CrossRepoRefs []CrossRepoRefInternal    `json:"crossRepoRefs"`
 }
 
@@ -72,7 +72,7 @@ func (a *CrossRepoImpactAnalyzer) Analyze(ctx context.Context, group string, tar
 	}
 
 	if localGS != nil {
-		localResult, err := pipeline.RunImpact(ctx, localGS, &pipeline.ImpactRequest{
+		localResult, err := collection.RunImpact(ctx, localGS, &collection.ImpactRequest{
 			Target:    target,
 			Direction: direction,
 			MaxDepth:  3,

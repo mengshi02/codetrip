@@ -7,7 +7,7 @@ import (
 	"strings"
 
 	"github.com/mengshi02/codetrip/internal/graph"
-	"github.com/mengshi02/codetrip/internal/pipeline"
+	"github.com/mengshi02/codetrip/internal/collection"
 )
 
 // ExpoRouterExtractor Expo Router extractor
@@ -23,7 +23,7 @@ type ExpoRouterExtractor struct{}
 func (e *ExpoRouterExtractor) Framework() string { return "expo-router" }
 
 // Extract implements RouteExtractor
-func (e *ExpoRouterExtractor) Extract(ctx context.Context, g *graph.GraphStore, files []*pipeline.ParsedFile) ([]*Route, error) {
+func (e *ExpoRouterExtractor) Extract(ctx context.Context, g *graph.GraphStore, files []*collection.ParsedFile) ([]*Route, error) {
 	slice := acquireRouteSlice()
 	defer releaseRouteSlice(slice)
 
@@ -47,7 +47,7 @@ func (e *ExpoRouterExtractor) Extract(ctx context.Context, g *graph.GraphStore, 
 	return result, nil
 }
 
-func (e *ExpoRouterExtractor) extractFromFile(f *pipeline.ParsedFile, g *graph.GraphStore) []*Route {
+func (e *ExpoRouterExtractor) extractFromFile(f *collection.ParsedFile, g *graph.GraphStore) []*Route {
 	relPath := extractExpoAppRelPath(f.Path)
 	if relPath == "" {
 		return nil

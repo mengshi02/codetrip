@@ -5,7 +5,7 @@ import (
 	"strings"
 
 	"github.com/mengshi02/codetrip/internal/graph"
-	"github.com/mengshi02/codetrip/internal/pipeline"
+	"github.com/mengshi02/codetrip/internal/collection"
 )
 
 // FetchCallExtractor fetch call tracking extractor
@@ -20,7 +20,7 @@ type FetchCallExtractor struct{}
 func (e *FetchCallExtractor) Framework() string { return "fetch" }
 
 // Extract implements RouteExtractor
-func (e *FetchCallExtractor) Extract(ctx context.Context, g *graph.GraphStore, files []*pipeline.ParsedFile) ([]*Route, error) {
+func (e *FetchCallExtractor) Extract(ctx context.Context, g *graph.GraphStore, files []*collection.ParsedFile) ([]*Route, error) {
 	slice := acquireRouteSlice()
 	defer releaseRouteSlice(slice)
 
@@ -43,7 +43,7 @@ func (e *FetchCallExtractor) Extract(ctx context.Context, g *graph.GraphStore, f
 	return result, nil
 }
 
-func (e *FetchCallExtractor) extractFromFile(f *pipeline.ParsedFile, g *graph.GraphStore, registeredRoutes map[string]string) []*Route {
+func (e *FetchCallExtractor) extractFromFile(f *collection.ParsedFile, g *graph.GraphStore, registeredRoutes map[string]string) []*Route {
 	var routes []*Route
 
 	for _, call := range f.CallSites {
@@ -107,7 +107,7 @@ type fetchCallInfo struct {
 }
 
 // parseFetchCall parses fetch/axios calls from call site
-func parseFetchCall(call *pipeline.CallSite) *fetchCallInfo {
+func parseFetchCall(call *collection.CallSite) *fetchCallInfo {
 	switch {
 	case call.Name == "fetch":
 		// fetch('/api/users') or fetch('/api/users', {method: 'POST'})

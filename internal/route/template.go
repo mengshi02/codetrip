@@ -7,7 +7,7 @@ import (
 	"strings"
 
 	"github.com/mengshi02/codetrip/internal/graph"
-	"github.com/mengshi02/codetrip/internal/pipeline"
+	"github.com/mengshi02/codetrip/internal/collection"
 )
 
 // TemplateURLExtractor template URL extractor
@@ -25,7 +25,7 @@ type TemplateURLExtractor struct{}
 func (e *TemplateURLExtractor) Framework() string { return "template" }
 
 // Extract implements RouteExtractor
-func (e *TemplateURLExtractor) Extract(ctx context.Context, g *graph.GraphStore, files []*pipeline.ParsedFile) ([]*Route, error) {
+func (e *TemplateURLExtractor) Extract(ctx context.Context, g *graph.GraphStore, files []*collection.ParsedFile) ([]*Route, error) {
 	slice := acquireRouteSlice()
 	defer releaseRouteSlice(slice)
 
@@ -49,7 +49,7 @@ func (e *TemplateURLExtractor) Extract(ctx context.Context, g *graph.GraphStore,
 	return result, nil
 }
 
-func (e *TemplateURLExtractor) extractFromFile(f *pipeline.ParsedFile, g *graph.GraphStore) []*Route {
+func (e *TemplateURLExtractor) extractFromFile(f *collection.ParsedFile, g *graph.GraphStore) []*Route {
 	var routes []*Route
 
 	// Extract URL properties from symbol information
@@ -104,7 +104,7 @@ func isTemplateFile(path string) bool {
 }
 
 // extractURLFromSymbol extracts URL from symbol properties
-func extractURLFromSymbol(sym *pipeline.SymbolInfo) string {
+func extractURLFromSymbol(sym *collection.SymbolInfo) string {
 	for _, key := range []string{"href", "action", "src", "url", "path"} {
 		if v, ok := sym.Props[key]; ok {
 			if s, ok := v.(string); ok && s != "" {
@@ -137,7 +137,7 @@ func isRouteURL(url string) bool {
 }
 
 // inferMethodFromSymbol infers HTTP method from symbol
-func inferMethodFromSymbol(sym *pipeline.SymbolInfo) string {
+func inferMethodFromSymbol(sym *collection.SymbolInfo) string {
 	// form action → POST
 	if v, ok := sym.Props["action"]; ok && v != nil {
 		if method, ok := sym.Props["method"]; ok {

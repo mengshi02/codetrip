@@ -6,7 +6,7 @@ import (
 	"strings"
 
 	"github.com/mengshi02/codetrip/internal/graph"
-	"github.com/mengshi02/codetrip/internal/pipeline"
+	"github.com/mengshi02/codetrip/internal/collection"
 )
 
 // DecoratorRouteExtractor decorator route extractor
@@ -20,7 +20,7 @@ type DecoratorRouteExtractor struct{}
 func (e *DecoratorRouteExtractor) Framework() string { return "decorator" }
 
 // Extract implements RouteExtractor
-func (e *DecoratorRouteExtractor) Extract(ctx context.Context, g *graph.GraphStore, files []*pipeline.ParsedFile) ([]*Route, error) {
+func (e *DecoratorRouteExtractor) Extract(ctx context.Context, g *graph.GraphStore, files []*collection.ParsedFile) ([]*Route, error) {
 	slice := acquireRouteSlice()
 	defer releaseRouteSlice(slice)
 
@@ -40,7 +40,7 @@ func (e *DecoratorRouteExtractor) Extract(ctx context.Context, g *graph.GraphSto
 	return result, nil
 }
 
-func (e *DecoratorRouteExtractor) extractFromFile(f *pipeline.ParsedFile, g *graph.GraphStore) []*Route {
+func (e *DecoratorRouteExtractor) extractFromFile(f *collection.ParsedFile, g *graph.GraphStore) []*Route {
 	var routes []*Route
 
 	// Iterate through ClassInfo to detect decorators
@@ -67,7 +67,7 @@ func (e *DecoratorRouteExtractor) extractFromFile(f *pipeline.ParsedFile, g *gra
 }
 
 // extractClassBaseRoute extracts class-level route prefix
-func (e *DecoratorRouteExtractor) extractClassBaseRoute(cls *pipeline.ClassInfo, f *pipeline.ParsedFile) string {
+func (e *DecoratorRouteExtractor) extractClassBaseRoute(cls *collection.ClassInfo, f *collection.ParsedFile) string {
 	// NestJS: @Controller('path')
 	// Spring: @RequestMapping(path = "/api")
 	for _, sym := range f.Symbols {
@@ -84,7 +84,7 @@ func (e *DecoratorRouteExtractor) extractClassBaseRoute(cls *pipeline.ClassInfo,
 }
 
 // extractMethodRoutes extracts routes from method decorators
-func (e *DecoratorRouteExtractor) extractMethodRoutes(method string, cls *pipeline.ClassInfo, f *pipeline.ParsedFile, g *graph.GraphStore, basePath string) []*Route {
+func (e *DecoratorRouteExtractor) extractMethodRoutes(method string, cls *collection.ClassInfo, f *collection.ParsedFile, g *graph.GraphStore, basePath string) []*Route {
 	var routes []*Route
 
 	// Find decorators for this method in call sites
@@ -122,7 +122,7 @@ func (e *DecoratorRouteExtractor) extractMethodRoutes(method string, cls *pipeli
 }
 
 // extractDecoratorRoute extracts route from decorator symbol
-func (e *DecoratorRouteExtractor) extractDecoratorRoute(sym *pipeline.SymbolInfo, f *pipeline.ParsedFile, g *graph.GraphStore) *Route {
+func (e *DecoratorRouteExtractor) extractDecoratorRoute(sym *collection.SymbolInfo, f *collection.ParsedFile, g *graph.GraphStore) *Route {
 	info := parseDecoratorName(sym.Name)
 	if info == nil {
 		return nil

@@ -5,7 +5,7 @@ import (
 	"strings"
 
 	"github.com/mengshi02/codetrip/internal/graph"
-	"github.com/mengshi02/codetrip/internal/pipeline"
+	"github.com/mengshi02/codetrip/internal/collection"
 )
 
 // PHPFileRouteExtractor PHP file route extractor
@@ -20,7 +20,7 @@ type PHPFileRouteExtractor struct{}
 func (e *PHPFileRouteExtractor) Framework() string { return "php-file" }
 
 // Extract implements RouteExtractor
-func (e *PHPFileRouteExtractor) Extract(ctx context.Context, g *graph.GraphStore, files []*pipeline.ParsedFile) ([]*Route, error) {
+func (e *PHPFileRouteExtractor) Extract(ctx context.Context, g *graph.GraphStore, files []*collection.ParsedFile) ([]*Route, error) {
 	slice := acquireRouteSlice()
 	defer releaseRouteSlice(slice)
 
@@ -44,7 +44,7 @@ func (e *PHPFileRouteExtractor) Extract(ctx context.Context, g *graph.GraphStore
 	return result, nil
 }
 
-func (e *PHPFileRouteExtractor) extractFromFile(f *pipeline.ParsedFile, g *graph.GraphStore) []*Route {
+func (e *PHPFileRouteExtractor) extractFromFile(f *collection.ParsedFile, g *graph.GraphStore) []*Route {
 	var routes []*Route
 
 	// Detect $_SERVER['REQUEST_URI'] routing dispatch
@@ -88,7 +88,7 @@ func (e *PHPFileRouteExtractor) extractFromFile(f *pipeline.ParsedFile, g *graph
 }
 
 // extractServerRoutes extracts routes from $_SERVER['REQUEST_URI'] pattern
-func (e *PHPFileRouteExtractor) extractServerRoutes(f *pipeline.ParsedFile, g *graph.GraphStore) []*Route {
+func (e *PHPFileRouteExtractor) extractServerRoutes(f *collection.ParsedFile, g *graph.GraphStore) []*Route {
 	var routes []*Route
 
 	// Find symbols related to REQUEST_URI
@@ -117,7 +117,7 @@ func (e *PHPFileRouteExtractor) extractServerRoutes(f *pipeline.ParsedFile, g *g
 }
 
 // extractSwitchRoute extracts routes from switch/case pattern
-func (e *PHPFileRouteExtractor) extractSwitchRoute(sym *pipeline.SymbolInfo, f *pipeline.ParsedFile, g *graph.GraphStore) *Route {
+func (e *PHPFileRouteExtractor) extractSwitchRoute(sym *collection.SymbolInfo, f *collection.ParsedFile, g *graph.GraphStore) *Route {
 	// Check if function properties have switch-case routing information
 	path, hasPath := sym.Props["caseValue"]
 	if !hasPath {

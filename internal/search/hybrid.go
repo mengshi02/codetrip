@@ -11,6 +11,26 @@ type HybridSearch struct {
 	vector *VectorSearch
 }
 
+// symbolTypePriority returns a priority value for a symbol label.
+// Lower values = higher priority. Used to break ties in RRF score ranking.
+// Interface > Struct/Class > Function/Method > other types.
+func symbolTypePriority(label string) int {
+	switch label {
+	case "Interface":
+		return 1
+	case "Struct", "Class":
+		return 2
+	case "Function", "Method":
+		return 3
+	case "Trait":
+		return 4
+	case "Constructor":
+		return 5
+	default:
+		return 10
+	}
+}
+
 // NewHybridSearch creates a hybrid search engine
 func NewHybridSearch(bm25 *BM25Index, vector *VectorSearch) *HybridSearch {
 	return &HybridSearch{
@@ -121,9 +141,13 @@ func (h *HybridSearch) Search(query string, limit int) (*HybridResult, error) {
 		items = append(items, *item)
 	}
 
-	// Sort by RRF score descending (sort.Slice O(n log n), replacing O(n²) bubble sort)
+	// Sort by RRF score descending; break ties by symbol type priority
+	// (Interface > Struct > Function > other types) for better result relevance
 	sort.Slice(items, func(i, j int) bool {
-		return items[i].Score > items[j].Score
+		if items[i].Score != items[j].Score {
+			return items[i].Score > items[j].Score
+		}
+		return symbolTypePriority(items[i].Label) < symbolTypePriority(items[j].Label)
 	})
 
 	if limit > 0 && len(items) > limit {
@@ -214,13 +238,16 @@ func (h *HybridSearch) SearchDualModal(ctx context.Context, query string, limit 
 		}
 	}
 
-	// Sort by RRF score descending
+	// Sort by RRF score descending; break ties by symbol type priority
 	items := make([]HybridSearchItem, 0, len(scores))
 	for _, item := range scores {
 		items = append(items, *item)
 	}
 	sort.Slice(items, func(i, j int) bool {
-		return items[i].Score > items[j].Score
+		if items[i].Score != items[j].Score {
+			return items[i].Score > items[j].Score
+		}
+		return symbolTypePriority(items[i].Label) < symbolTypePriority(items[j].Label)
 	})
 
 	if limit > 0 && len(items) > limit {

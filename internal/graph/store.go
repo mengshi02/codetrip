@@ -795,10 +795,10 @@ func (s *GraphStore) DetectCycles(ctx context.Context, repo string) ([][]string,
 
 	// dfsFrame represents a stack frame for iterative DFS
 	type dfsFrame struct {
-		nodeID   string
-		edgeIdx  int     // current edge index being processed
-		edges    []*Edge // pre-fetched edges for this node
-		returning bool   // true = returning from a child, false = first visit
+		nodeID    string
+		edgeIdx   int     // current edge index being processed
+		edges     []*Edge // pre-fetched edges for this node
+		returning bool    // true = returning from a child, false = first visit
 	}
 
 	totalVisited := 0
@@ -810,9 +810,9 @@ func (s *GraphStore) DetectCycles(ctx context.Context, repo string) ([][]string,
 
 		// Start DFS from this node
 		stack := []dfsFrame{{
-			nodeID: startNode.ID,
-			edgeIdx: 0,
-			edges:  nil,
+			nodeID:    startNode.ID,
+			edgeIdx:   0,
+			edges:     nil,
 			returning: false,
 		}}
 
@@ -835,9 +835,24 @@ func (s *GraphStore) DetectCycles(ctx context.Context, repo string) ([][]string,
 			if !frame.returning {
 				visited[frame.nodeID] = 1
 				path = append(path, frame.nodeID)
-				// Fetch edges lazily
+				// Cycle-detection edges: only consider semantic (dependency) edges.
+				// Structural edges like DEFINES, CONTAINS, MEMBER_OF create spurious cycles.
 				edges, _ := s.GetAllOutEdges(frame.nodeID)
-				frame.edges = edges
+				var semanticEdges []*Edge
+				for _, e := range edges {
+					switch e.Type {
+					case RelCalls, RelImplements, RelExtends, RelInherits, RelAccesses,
+						RelUses, RelMethodOverrides, RelMethodImplements, RelQueries,
+						RelFetches, RelWraps, RelDecorates, RelBindsEventHandler, RelEmitsEvent:
+						if e.Source == e.Target {
+							continue // skip self-loops
+						}
+						semanticEdges = append(semanticEdges, e)
+					default:
+						continue // skip structural/organizational edges (DEFINES, CONTAINS, MEMBER_OF, etc.)
+					}
+				}
+				frame.edges = semanticEdges
 				frame.edgeIdx = 0
 				frame.returning = true
 				totalVisited++
@@ -852,9 +867,9 @@ func (s *GraphStore) DetectCycles(ctx context.Context, repo string) ([][]string,
 				switch visited[targetID] {
 				case 0: // white — recurse
 					stack = append(stack, dfsFrame{
-						nodeID:   targetID,
-						edgeIdx:  0,
-						edges:    nil,
+						nodeID:    targetID,
+						edgeIdx:   0,
+						edges:     nil,
 						returning: false,
 					})
 				case 1: // gray — cycle detected
@@ -882,7 +897,122 @@ func (s *GraphStore) DetectCycles(ctx context.Context, repo string) ([][]string,
 		}
 	}
 
-	return cycles, nil
+	return deduplicateAndSortCycles(cycles), nil
+}
+
+// deduplicateAndSortCycles removes duplicate cycles (same set of nodes, different start point)
+// and sorts remaining cycles by length (shortest first).
+// A cycle A→B→C→A is the same as B→C→A→B — we normalize by starting from the
+// lexicographically smallest node ID.
+// Also removes supersets: if cycle A→B→C exists, A→B→C→D is a superset and is removed.
+func deduplicateAndSortCycles(cycles [][]string) [][]string {
+	if len(cycles) == 0 {
+		return cycles
+	}
+
+	seen := make(map[string]bool)
+	var result [][]string
+
+	for _, cycle := range cycles {
+		if len(cycle) == 0 {
+			continue
+		}
+		// Normalize: find the rotation starting from the smallest node ID
+		minIdx := 0
+		for i := 1; i < len(cycle); i++ {
+			if cycle[i] < cycle[minIdx] {
+				minIdx = i
+			}
+		}
+		// Rotate cycle to start from minIdx
+		normalized := make([]string, len(cycle))
+		copy(normalized, cycle[minIdx:])
+		copy(normalized[len(cycle)-minIdx:], cycle[:minIdx])
+
+		// Use the normalized cycle as a dedup key
+		key := strings.Join(normalized, "|")
+		if !seen[key] {
+			seen[key] = true
+			result = append(result, normalized)
+		}
+	}
+
+	// Remove superset cycles: if a shorter cycle's node set is a subset of
+	// a longer cycle's node set, the longer one is redundant (it's just the
+	// shorter cycle with detours). Only keep the minimal (shortest) representation.
+	result = removeSupersetCycles(result)
+
+	// Sort by cycle length (shortest first — most actionable)
+	for i := 0; i < len(result)-1; i++ {
+		for j := i + 1; j < len(result); j++ {
+			if len(result[i]) > len(result[j]) {
+				result[i], result[j] = result[j], result[i]
+			}
+		}
+	}
+
+	return result
+}
+
+// removeSupersetCycles removes cycles whose node set is a superset of
+// another cycle's node set. For example, if A→B→C and A→B→D→C both exist,
+// the latter contains A,B,C plus D, so it's a superset of {A,B,C} and is removed.
+func removeSupersetCycles(cycles [][]string) [][]string {
+	if len(cycles) <= 1 {
+		return cycles
+	}
+
+	// Build node sets for each cycle
+	type cycleSet struct {
+		cycle   []string
+		nodeSet map[string]bool
+	}
+	sets := make([]cycleSet, len(cycles))
+	for i, c := range cycles {
+		ns := make(map[string]bool, len(c))
+		for _, id := range c {
+			ns[id] = true
+		}
+		sets[i] = cycleSet{cycle: c, nodeSet: ns}
+	}
+
+	keep := make([]bool, len(cycles))
+	for i := range keep {
+		keep[i] = true
+	}
+
+	for i := 0; i < len(sets); i++ {
+		if !keep[i] {
+			continue
+		}
+		for j := 0; j < len(sets); j++ {
+			if i == j || !keep[j] {
+				continue
+			}
+			// If set[i] ⊆ set[j] and len(i) < len(j), then j is a superset of i → remove j
+			if len(sets[i].cycle) < len(sets[j].cycle) && isSubset(sets[i].nodeSet, sets[j].nodeSet) {
+				keep[j] = false
+			}
+		}
+	}
+
+	var result [][]string
+	for i, k := range keep {
+		if k {
+			result = append(result, sets[i].cycle)
+		}
+	}
+	return result
+}
+
+// isSubset returns true if every key in a is also in b.
+func isSubset(a, b map[string]bool) bool {
+	for k := range a {
+		if !b[k] {
+			return false
+		}
+	}
+	return true
 }
 
 // ============ Helper Methods ============

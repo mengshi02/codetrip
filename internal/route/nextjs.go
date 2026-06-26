@@ -7,7 +7,7 @@ import (
 	"strings"
 
 	"github.com/mengshi02/codetrip/internal/graph"
-	"github.com/mengshi02/codetrip/internal/pipeline"
+	"github.com/mengshi02/codetrip/internal/collection"
 )
 
 // ============ Next.js Pages Router ============
@@ -23,7 +23,7 @@ type NextJSPagesExtractor struct{}
 func (e *NextJSPagesExtractor) Framework() string { return "nextjs-pages" }
 
 // Extract implements RouteExtractor
-func (e *NextJSPagesExtractor) Extract(ctx context.Context, g *graph.GraphStore, files []*pipeline.ParsedFile) ([]*Route, error) {
+func (e *NextJSPagesExtractor) Extract(ctx context.Context, g *graph.GraphStore, files []*collection.ParsedFile) ([]*Route, error) {
 	slice := acquireRouteSlice()
 	defer releaseRouteSlice(slice)
 
@@ -47,7 +47,7 @@ func (e *NextJSPagesExtractor) Extract(ctx context.Context, g *graph.GraphStore,
 	return result, nil
 }
 
-func (e *NextJSPagesExtractor) extractFromFile(f *pipeline.ParsedFile, g *graph.GraphStore) []*Route {
+func (e *NextJSPagesExtractor) extractFromFile(f *collection.ParsedFile, g *graph.GraphStore) []*Route {
 	relPath := extractPagesRelPath(f.Path)
 	if relPath == "" {
 		return nil
@@ -92,7 +92,7 @@ type NextJSAppExtractor struct{}
 func (e *NextJSAppExtractor) Framework() string { return "nextjs-app" }
 
 // Extract implements RouteExtractor
-func (e *NextJSAppExtractor) Extract(ctx context.Context, g *graph.GraphStore, files []*pipeline.ParsedFile) ([]*Route, error) {
+func (e *NextJSAppExtractor) Extract(ctx context.Context, g *graph.GraphStore, files []*collection.ParsedFile) ([]*Route, error) {
 	slice := acquireRouteSlice()
 	defer releaseRouteSlice(slice)
 
@@ -116,7 +116,7 @@ func (e *NextJSAppExtractor) Extract(ctx context.Context, g *graph.GraphStore, f
 	return result, nil
 }
 
-func (e *NextJSAppExtractor) extractFromFile(f *pipeline.ParsedFile, g *graph.GraphStore) []*Route {
+func (e *NextJSAppExtractor) extractFromFile(f *collection.ParsedFile, g *graph.GraphStore) []*Route {
 	relPath := extractAppRelPath(f.Path)
 	if relPath == "" {
 		return nil
@@ -253,7 +253,7 @@ func appPathToRoute(relPath string) string {
 }
 
 // detectExportedMethods detects exported HTTP methods in route.ts
-func detectExportedMethods(f *pipeline.ParsedFile) []string {
+func detectExportedMethods(f *collection.ParsedFile) []string {
 	methods := []string{"GET", "POST", "PUT", "DELETE", "PATCH", "HEAD", "OPTIONS"}
 	var exported []string
 	for _, sym := range f.Symbols {
@@ -268,7 +268,7 @@ func detectExportedMethods(f *pipeline.ParsedFile) []string {
 }
 
 // findDefaultExportHandler finds the node ID of default export function
-func findDefaultExportHandler(f *pipeline.ParsedFile, g *graph.GraphStore) string {
+func findDefaultExportHandler(f *collection.ParsedFile, g *graph.GraphStore) string {
 	for _, sym := range f.Symbols {
 		if sym.Name == "default" || sym.Name == "Default" {
 			return sym.NodeID
@@ -278,7 +278,7 @@ func findDefaultExportHandler(f *pipeline.ParsedFile, g *graph.GraphStore) strin
 }
 
 // findNamedExportHandler finds the node ID of named export function
-func findNamedExportHandler(f *pipeline.ParsedFile, name string, g *graph.GraphStore) string {
+func findNamedExportHandler(f *collection.ParsedFile, name string, g *graph.GraphStore) string {
 	for _, sym := range f.Symbols {
 		if sym.Name == name {
 			return sym.NodeID

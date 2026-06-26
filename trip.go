@@ -11,14 +11,13 @@ import (
 	"time"
 
 	"github.com/cockroachdb/pebble/v2"
-	"github.com/mengshi02/codetrip/internal/cypher"
+	"github.com/mengshi02/codetrip/internal/collection"
+	"github.com/mengshi02/codetrip/internal/collection/languages"
+	"github.com/mengshi02/codetrip/internal/collection/phases"
 	"github.com/mengshi02/codetrip/internal/embedding"
 	"github.com/mengshi02/codetrip/internal/graph"
 	"github.com/mengshi02/codetrip/internal/group"
 	"github.com/mengshi02/codetrip/internal/incremental"
-	"github.com/mengshi02/codetrip/internal/pipeline"
-	"github.com/mengshi02/codetrip/internal/pipeline/lang"
-	"github.com/mengshi02/codetrip/internal/pipeline/phases"
 	"github.com/mengshi02/codetrip/internal/search"
 	"github.com/mengshi02/codetrip/internal/store"
 	"github.com/mengshi02/codetrip/internal/vecfile"
@@ -50,7 +49,7 @@ type Trip struct {
 	opts           options
 	mu             sync.RWMutex
 	graphs         map[string]*graph.GraphStore // repo → GraphStore
-	pipeline       *pipeline.Pipeline
+	pipeline       *collection.Pipeline
 	groupSvc       *group.GroupService             // cross-repo group service
 	bm25Indices    map[string]*search.BM25Index    // repo → BM25Index (persisted)
 	vectorSearches map[string]*search.VectorSearch // repo → VectorSearch (with HNSW persistence)
@@ -63,7 +62,7 @@ type Trip struct {
 	tools              map[string]Tool
 	embedder           Embedder
 	contractExtractors map[ContractType]ContractExtractor
-	phases             []pipeline.Phase
+	phases             []collection.Phase
 }
 
 // Open opens the codetrip engine
@@ -98,7 +97,7 @@ func Open(dir string, opts ...Option) (*Trip, error) {
 		tripDir:            dir,
 		opts:               o,
 		graphs:             make(map[string]*graph.GraphStore),
-		pipeline:           pipeline.NewPipeline(),
+		pipeline:           collection.NewPipeline(),
 		languageProviders:  make(map[graph.Label]LanguageProvider),
 		scopeResolvers:     make(map[graph.Label]ScopeResolver),
 		tools:              make(map[string]Tool),
@@ -114,6 +113,9 @@ func Open(dir string, opts ...Option) (*Trip, error) {
 
 	// Register built-in language providers
 	trip.registerBuiltinProviders()
+
+	// Register built-in scope resolvers
+	trip.registerBuiltinScopeResolvers()
 
 	// Register user-defined Phases
 	for _, phase := range o.phases {
@@ -703,14 +705,14 @@ func (trip *Trip) IndexRepo(ctx context.Context, repoPath string, opts ...IndexO
 	trip.mu.Unlock()
 
 	// Run pipeline
-	mutable := pipeline.NewMutableSemanticModel()
-	sm := pipeline.NewSemanticModel()
-	input := &pipeline.PhaseInput{
+	mutable := collection.NewMutableSemanticModel()
+	sm := collection.NewSemanticModel()
+	input := &collection.PhaseInput{
 		Repo:          repoName,
 		Graph:         gs,
 		SemanticModel: sm,
 		MutableModel:  mutable,
-		Config: pipeline.PipelineConfig{
+		Config: collection.PipelineConfig{
 			RepoPath:      repoPath,
 			TripDir:       trip.tripDir,
 			MaxWorkers:    idxOpts.maxWorkers,
@@ -853,7 +855,7 @@ func (trip *Trip) ReIndex(ctx context.Context, repoPath string, opts ...IndexOpt
 
 	// Step 3: Re-parse added + modified files via mini pipeline (structure → parse)
 	var changedNodeIDs []string
-	filesToParse := make([]*pipeline.ParsedFile, 0, len(addedFiles)+len(modifiedFiles))
+	filesToParse := make([]*collection.ParsedFile, 0, len(addedFiles)+len(modifiedFiles))
 	for _, change := range append(addedFiles, modifiedFiles...) {
 		fullPath := filepath.Join(repoPath, change.Path)
 		content, err := os.ReadFile(fullPath)
@@ -867,7 +869,7 @@ func (trip *Trip) ReIndex(ctx context.Context, repoPath string, opts ...IndexOpt
 			continue // skip unsupported file types
 		}
 
-		filesToParse = append(filesToParse, &pipeline.ParsedFile{
+		filesToParse = append(filesToParse, &collection.ParsedFile{
 			Path:        change.Path,
 			Language:    langStr,
 			ContentHash: change.NewHash,
@@ -877,16 +879,16 @@ func (trip *Trip) ReIndex(ctx context.Context, repoPath string, opts ...IndexOpt
 
 	if len(filesToParse) > 0 {
 		// Create mini pipeline with only structure + parse phases (reuse pipeline logic)
-		miniPipe := pipeline.NewPipeline()
+		miniPipe := collection.NewPipeline()
 		miniPipe.Register(phases.NewStructurePhase())
 		miniPipe.Register(phases.NewParsePhase())
 
-		miniInput := &pipeline.PhaseInput{
+		miniInput := &collection.PhaseInput{
 			Repo:          repoName,
 			Graph:         gs,
-			SemanticModel: pipeline.NewSemanticModel(),
-			MutableModel:  pipeline.NewMutableSemanticModel(),
-			Config: pipeline.PipelineConfig{
+			SemanticModel: collection.NewSemanticModel(),
+			MutableModel:  collection.NewMutableSemanticModel(),
+			Config: collection.PipelineConfig{
 				RepoPath:   repoPath,
 				MaxWorkers: idxOpts.maxWorkers,
 				ByteBudget: idxOpts.byteBudget,
@@ -1126,77 +1128,6 @@ func (trip *Trip) RepoStatus(repoName string) (*RepoStatusInfo, error) {
 	}, nil
 }
 
-// ============ Graph Query ============
-
-// Query executes a graph query
-func (trip *Trip) Query(ctx context.Context, stmt string, params ...Param) (*QueryResult, error) {
-	result, err := trip.Cypher(ctx, stmt, params...)
-	if err != nil {
-		return nil, err
-	}
-	return &QueryResult{
-		Columns: result.Columns,
-		Rows:    result.Rows,
-	}, nil
-}
-
-// Cypher executes a Cypher query with timeout protection.
-// If cypherTimeout is set (default 30s), the query is wrapped in a context.WithTimeout.
-// When the timeout expires, ErrQueryTimeout is returned.
-func (trip *Trip) Cypher(ctx context.Context, query string, params ...Param) (*CypherResult, error) {
-	trip.metrics.CypherQueries.Add(1)
-
-	// Apply default Cypher timeout if configured
-	if trip.opts.cypherTimeout > 0 {
-		var cancel context.CancelFunc
-		ctx, cancel = context.WithTimeout(ctx, trip.opts.cypherTimeout)
-		defer cancel()
-	}
-
-	// Determine which repo's GraphStore to use
-	repo := ""
-	if len(params) > 0 {
-		for _, p := range params {
-			if p.Key == "repo" {
-				if s, ok := p.Value.(string); ok {
-					repo = s
-				}
-			}
-		}
-	}
-
-	gs := trip.GraphStore(repo)
-	if gs == nil {
-		return nil, fmt.Errorf("%w: no graph store for repo %q (use --repo to specify)", ErrNoGraphStore, repo)
-	}
-
-	// Build Cypher parameters
-	cypherParams := make(map[string]any)
-	for _, p := range params {
-		cypherParams[p.Key] = p.Value
-	}
-
-	// Execute query using Cypher engine with context
-	executor := cypher.NewExecutor(gs)
-	result, err := executor.Execute(ctx, query, cypherParams)
-	if err != nil {
-		return nil, fmt.Errorf("cypher execute: %w", err)
-	}
-
-	// Convert result format
-	cr := &CypherResult{
-		Columns: result.Columns,
-		Rows:    make([]map[string]any, len(result.Rows)),
-		Stats:   map[string]int{"rows": len(result.Rows)},
-	}
-	for i, row := range result.Rows {
-		cr.Rows[i] = map[string]any(row)
-	}
-
-	return cr, nil
-}
-
-// getBM25Index gets or creates a persisted BM25 index
 func (trip *Trip) getBM25Index(repo string) (*search.BM25Index, error) {
 	trip.mu.RLock()
 	idx, ok := trip.bm25Indices[repo]
@@ -1425,12 +1356,12 @@ var labelToLangMap = map[graph.Label]string{
 }
 
 // buildProviderMap converts the Label-keyed provider map to a language-name-keyed
-// pipeline.Provider map for use by the parse phase.
-func buildProviderMap(providers map[graph.Label]LanguageProvider) map[string]pipeline.Provider {
+// collection.Provider map for use by the parse phase.
+func buildProviderMap(providers map[graph.Label]LanguageProvider) map[string]collection.Provider {
 	if len(providers) == 0 {
 		return nil
 	}
-	m := make(map[string]pipeline.Provider, len(providers))
+	m := make(map[string]collection.Provider, len(providers))
 	for label, prov := range providers {
 		langName, ok := labelToLangMap[label]
 		if !ok {
@@ -1456,7 +1387,7 @@ func (trip *Trip) RegisterScopeResolver(lang graph.Label, resolver ScopeResolver
 }
 
 // RegisterPhase registers a custom Phase
-func (trip *Trip) RegisterPhase(phase pipeline.Phase) {
+func (trip *Trip) RegisterPhase(phase collection.Phase) {
 	trip.mu.Lock()
 	defer trip.mu.Unlock()
 	trip.pipeline.Register(phase)
@@ -1583,7 +1514,7 @@ func (trip *Trip) getGraphStore(repo string) (*graph.GraphStore, error) {
 }
 
 // Impact performs impact analysis
-func (trip *Trip) Impact(ctx context.Context, req *pipeline.ImpactRequest) (*pipeline.ImpactResult, error) {
+func (trip *Trip) Impact(ctx context.Context, req *collection.ImpactRequest) (*collection.ImpactResult, error) {
 	ctx = withRequestID(ctx, newRequestID())
 	if err := req.Validate(); err != nil {
 		return nil, err
@@ -1600,11 +1531,11 @@ func (trip *Trip) Impact(ctx context.Context, req *pipeline.ImpactRequest) (*pip
 	if err != nil {
 		return nil, err
 	}
-	return pipeline.RunImpact(ctx, gs, req)
+	return collection.RunImpact(ctx, gs, req)
 }
 
 // Context returns a 360-degree symbol view
-func (trip *Trip) Context(ctx context.Context, req *pipeline.ContextRequest) (*pipeline.ContextResult, error) {
+func (trip *Trip) Context(ctx context.Context, req *collection.ContextRequest) (*collection.ContextResult, error) {
 	ctx = withRequestID(ctx, newRequestID())
 	if err := req.Validate(); err != nil {
 		return nil, err
@@ -1613,11 +1544,11 @@ func (trip *Trip) Context(ctx context.Context, req *pipeline.ContextRequest) (*p
 	if err != nil {
 		return nil, err
 	}
-	return pipeline.RunContext(ctx, gs, req)
+	return collection.RunContext(ctx, gs, req)
 }
 
 // DetectChanges detects changes
-func (trip *Trip) DetectChanges(ctx context.Context, req *pipeline.DetectChangesRequest) (*pipeline.DetectChangesResult, error) {
+func (trip *Trip) DetectChanges(ctx context.Context, req *collection.DetectChangesRequest) (*collection.DetectChangesResult, error) {
 	ctx = withRequestID(ctx, newRequestID())
 	if err := req.Validate(); err != nil {
 		return nil, err
@@ -1627,8 +1558,8 @@ func (trip *Trip) DetectChanges(ctx context.Context, req *pipeline.DetectChanges
 		return nil, err
 	}
 
-	result := &pipeline.DetectChangesResult{
-		RiskSummary: pipeline.RiskSummary{Level: "LOW"},
+	result := &collection.DetectChangesResult{
+		RiskSummary: collection.RiskSummary{Level: "LOW"},
 	}
 
 	// Integrate IncrementalIndexer (SHA1 hash-driven incremental indexing)
@@ -1644,24 +1575,44 @@ func (trip *Trip) DetectChanges(ctx context.Context, req *pipeline.DetectChanges
 			if change.Type == incremental.ChangeUnchanged {
 				continue
 			}
-			result.ChangedSymbols = append(result.ChangedSymbols, pipeline.SymbolChange{
+			sc := collection.SymbolChange{
 				FilePath:   change.Path,
 				ChangeType: change.Type.String(),
-			})
+			}
+			// Enrich with symbol information from the graph
+			nodes, err := gs.GetNodesByFile(gs.Repo(), change.Path)
+			if err == nil && len(nodes) > 0 {
+				// For modified files, include only actionable symbol-level nodes
+				// (exclude noise: Variable, Const, Property, etc.)
+				for _, node := range nodes {
+					if node.Label.IsActionableSymbol() {
+						result.ChangedSymbols = append(result.ChangedSymbols, collection.SymbolChange{
+							NodeID:     node.ID,
+							Name:       node.Name,
+							Kind:       string(node.Label),
+							FilePath:   change.Path,
+							ChangeType: change.Type.String(),
+						})
+					}
+				}
+				continue // already added enriched symbols
+			}
+			// Fallback: no nodes found in graph (e.g., new file not yet indexed)
+			result.ChangedSymbols = append(result.ChangedSymbols, sc)
 		}
 	}
 
 	// Evaluate affected processes
 	if len(result.ChangedSymbols) > 0 {
-		impactReq := &pipeline.ImpactRequest{
+		impactReq := &collection.ImpactRequest{
 			Target:    result.ChangedSymbols[0].Name,
 			Direction: "downstream",
 			MaxDepth:  2,
 		}
-		impactResult, err := pipeline.RunImpact(ctx, gs, impactReq)
+		impactResult, err := collection.RunImpact(ctx, gs, impactReq)
 		if err == nil {
 			result.AffectedProcesses = impactResult.AffectedProcesses
-			result.RiskSummary = pipeline.RiskSummary{
+			result.RiskSummary = collection.RiskSummary{
 				Level:        impactResult.Risk,
 				TotalChanges: len(result.ChangedSymbols),
 			}
@@ -1675,7 +1626,7 @@ func (trip *Trip) DetectChanges(ctx context.Context, req *pipeline.DetectChanges
 }
 
 // Rename performs multi-file coordinated renaming
-func (trip *Trip) Rename(ctx context.Context, req *pipeline.RenameRequest) (*pipeline.RenameResult, error) {
+func (trip *Trip) Rename(ctx context.Context, req *collection.RenameRequest) (*collection.RenameResult, error) {
 	ctx = withRequestID(ctx, newRequestID())
 	if err := req.Validate(); err != nil {
 		return nil, err
@@ -1685,7 +1636,7 @@ func (trip *Trip) Rename(ctx context.Context, req *pipeline.RenameRequest) (*pip
 		return nil, err
 	}
 
-	result := &pipeline.RenameResult{}
+	result := &collection.RenameResult{}
 
 	// Find target symbol
 	var startNodes []*graph.Node
@@ -1711,7 +1662,7 @@ func (trip *Trip) Rename(ctx context.Context, req *pipeline.RenameRequest) (*pip
 	for _, node := range startNodes {
 		visited[node.ID] = true
 		// Add the symbol itself
-		result.Edits = append(result.Edits, pipeline.RenameEdit{
+		result.Edits = append(result.Edits, collection.RenameEdit{
 			FilePath:   node.FilePath,
 			OldText:    req.SymbolName,
 			NewText:    req.NewName,
@@ -1730,7 +1681,7 @@ func (trip *Trip) Rename(ctx context.Context, req *pipeline.RenameRequest) (*pip
 				continue
 			}
 			visited[src.ID] = true
-			result.Edits = append(result.Edits, pipeline.RenameEdit{
+			result.Edits = append(result.Edits, collection.RenameEdit{
 				FilePath:   src.FilePath,
 				OldText:    req.SymbolName,
 				NewText:    req.NewName,
@@ -1756,7 +1707,7 @@ func (trip *Trip) Rename(ctx context.Context, req *pipeline.RenameRequest) (*pip
 			if e != nil {
 				continue
 			}
-			result.Edits = append(result.Edits, pipeline.RenameEdit{
+			result.Edits = append(result.Edits, collection.RenameEdit{
 				FilePath:   n.FilePath,
 				OldText:    req.SymbolName,
 				NewText:    req.NewName,
@@ -1769,7 +1720,7 @@ func (trip *Trip) Rename(ctx context.Context, req *pipeline.RenameRequest) (*pip
 }
 
 // RouteMap returns API route mapping
-func (trip *Trip) RouteMap(ctx context.Context, req *pipeline.RouteMapRequest) (*pipeline.RouteMapResult, error) {
+func (trip *Trip) RouteMap(ctx context.Context, req *collection.RouteMapRequest) (*collection.RouteMapResult, error) {
 	ctx = withRequestID(ctx, newRequestID())
 	if err := req.Validate(); err != nil {
 		return nil, err
@@ -1779,7 +1730,7 @@ func (trip *Trip) RouteMap(ctx context.Context, req *pipeline.RouteMapRequest) (
 		return nil, err
 	}
 
-	result := &pipeline.RouteMapResult{}
+	result := &collection.RouteMapResult{}
 
 	// Query Route nodes
 	routeNodes, err := gs.GetNodesByLabel(gs.Repo(), string(graph.LabelRoute))
@@ -1793,7 +1744,7 @@ func (trip *Trip) RouteMap(ctx context.Context, req *pipeline.RouteMapRequest) (
 			continue
 		}
 
-		routeInfo := pipeline.RouteInfo{
+		routeInfo := collection.RouteInfo{
 			Path:   node.GetPropString("path"),
 			Method: node.GetPropString("method"),
 		}
@@ -1834,7 +1785,7 @@ func (trip *Trip) RouteMap(ctx context.Context, req *pipeline.RouteMapRequest) (
 }
 
 // ToolMap returns MCP/RPC tool mapping
-func (trip *Trip) ToolMap(ctx context.Context, req *pipeline.ToolMapRequest) (*pipeline.ToolMapResult, error) {
+func (trip *Trip) ToolMap(ctx context.Context, req *collection.ToolMapRequest) (*collection.ToolMapResult, error) {
 	ctx = withRequestID(ctx, newRequestID())
 	if err := req.Validate(); err != nil {
 		return nil, err
@@ -1844,7 +1795,7 @@ func (trip *Trip) ToolMap(ctx context.Context, req *pipeline.ToolMapRequest) (*p
 		return nil, err
 	}
 
-	result := &pipeline.ToolMapResult{}
+	result := &collection.ToolMapResult{}
 
 	// Query Tool nodes
 	toolNodes, err := gs.GetNodesByLabel(gs.Repo(), string(graph.LabelTool))
@@ -1857,7 +1808,7 @@ func (trip *Trip) ToolMap(ctx context.Context, req *pipeline.ToolMapRequest) (*p
 			continue
 		}
 
-		toolInfo := pipeline.ToolInfo{
+		toolInfo := collection.ToolInfo{
 			Name:        node.Name,
 			Description: node.GetPropString("description"),
 		}
@@ -1880,7 +1831,7 @@ func (trip *Trip) ToolMap(ctx context.Context, req *pipeline.ToolMapRequest) (*p
 }
 
 // ShapeCheck performs response shape checking
-func (trip *Trip) ShapeCheck(ctx context.Context, req *pipeline.ShapeCheckRequest) (*pipeline.ShapeCheckResult, error) {
+func (trip *Trip) ShapeCheck(ctx context.Context, req *collection.ShapeCheckRequest) (*collection.ShapeCheckResult, error) {
 	ctx = withRequestID(ctx, newRequestID())
 	if err := req.Validate(); err != nil {
 		return nil, err
@@ -1890,7 +1841,7 @@ func (trip *Trip) ShapeCheck(ctx context.Context, req *pipeline.ShapeCheckReques
 		return nil, err
 	}
 
-	result := &pipeline.ShapeCheckResult{}
+	result := &collection.ShapeCheckResult{}
 
 	// Get Route nodes
 	routeNodes, err := gs.GetNodesByLabel(gs.Repo(), string(graph.LabelRoute))
@@ -1923,7 +1874,7 @@ func (trip *Trip) ShapeCheck(ctx context.Context, req *pipeline.ShapeCheckReques
 
 			// Check for mismatch
 			if routeResponseKeys != "" && consumerExpectedKeys != "" && routeResponseKeys != consumerExpectedKeys {
-				result.Mismatches = append(result.Mismatches, pipeline.ShapeMismatch{
+				result.Mismatches = append(result.Mismatches, collection.ShapeMismatch{
 					Route:    node.Name,
 					Field:    "keys",
 					Producer: routeResponseKeys,
@@ -1937,7 +1888,7 @@ func (trip *Trip) ShapeCheck(ctx context.Context, req *pipeline.ShapeCheckReques
 }
 
 // Check performs structural checks (e.g., circular dependency detection)
-func (trip *Trip) Check(ctx context.Context, req *pipeline.CheckRequest) (*pipeline.CheckResult, error) {
+func (trip *Trip) Check(ctx context.Context, req *collection.CheckRequest) (*collection.CheckResult, error) {
 	ctx = withRequestID(ctx, newRequestID())
 	if err := req.Validate(); err != nil {
 		return nil, err
@@ -1946,11 +1897,11 @@ func (trip *Trip) Check(ctx context.Context, req *pipeline.CheckRequest) (*pipel
 	if err != nil {
 		return nil, err
 	}
-	return pipeline.RunCheck(ctx, gs, req)
+	return collection.RunCheck(ctx, gs, req)
 }
 
 // ApiImpact performs API impact analysis (RouteMap + Impact + ShapeCheck)
-func (trip *Trip) ApiImpact(ctx context.Context, req *pipeline.ApiImpactRequest) (*pipeline.ApiImpactResult, error) {
+func (trip *Trip) ApiImpact(ctx context.Context, req *collection.ApiImpactRequest) (*collection.ApiImpactResult, error) {
 	ctx = withRequestID(ctx, newRequestID())
 	if err := req.Validate(); err != nil {
 		return nil, err
@@ -1960,10 +1911,10 @@ func (trip *Trip) ApiImpact(ctx context.Context, req *pipeline.ApiImpactRequest)
 		return nil, err
 	}
 
-	result := &pipeline.ApiImpactResult{}
+	result := &collection.ApiImpactResult{}
 
 	// RouteMap
-	routeMapResult, err := trip.RouteMap(ctx, &pipeline.RouteMapRequest{Route: req.Route, Repo: req.Repo})
+	routeMapResult, err := trip.RouteMap(ctx, &collection.RouteMapRequest{Route: req.Route, Repo: req.Repo})
 	if err != nil {
 		return nil, err
 	}
@@ -1976,7 +1927,7 @@ func (trip *Trip) ApiImpact(ctx context.Context, req *pipeline.ApiImpactRequest)
 			if e != nil {
 				continue
 			}
-			result.Consumers = append(result.Consumers, pipeline.ConsumerInfo{
+			result.Consumers = append(result.Consumers, collection.ConsumerInfo{
 				NodeID:   consumer.ID,
 				Name:     consumer.Name,
 				FilePath: consumer.FilePath,
@@ -1986,7 +1937,7 @@ func (trip *Trip) ApiImpact(ctx context.Context, req *pipeline.ApiImpactRequest)
 
 	// Impact analysis
 	if req.Route != "" {
-		impactResult, err := trip.Impact(ctx, &pipeline.ImpactRequest{
+		impactResult, err := trip.Impact(ctx, &collection.ImpactRequest{
 			Target:    req.Route,
 			Direction: "downstream",
 			MaxDepth:  3,
@@ -1998,7 +1949,7 @@ func (trip *Trip) ApiImpact(ctx context.Context, req *pipeline.ApiImpactRequest)
 	}
 
 	// ShapeCheck
-	shapeResult, err := trip.ShapeCheck(ctx, &pipeline.ShapeCheckRequest{Route: req.Route})
+	shapeResult, err := trip.ShapeCheck(ctx, &collection.ShapeCheckRequest{Route: req.Route})
 	if err == nil {
 		result.Mismatches = shapeResult.Mismatches
 	}
@@ -2020,7 +1971,7 @@ func (trip *Trip) ApiImpact(ctx context.Context, req *pipeline.ApiImpactRequest)
 }
 
 // Explain performs taint explanation
-func (trip *Trip) Explain(ctx context.Context, req *pipeline.ExplainRequest) (*pipeline.ExplainResult, error) {
+func (trip *Trip) Explain(ctx context.Context, req *collection.ExplainRequest) (*collection.ExplainResult, error) {
 	ctx = withRequestID(ctx, newRequestID())
 	if err := req.Validate(); err != nil {
 		return nil, err
@@ -2030,7 +1981,7 @@ func (trip *Trip) Explain(ctx context.Context, req *pipeline.ExplainRequest) (*p
 		return nil, err
 	}
 
-	result := &pipeline.ExplainResult{}
+	result := &collection.ExplainResult{}
 	limit := req.Limit
 	if limit <= 0 {
 		limit = 100
@@ -2057,7 +2008,7 @@ func (trip *Trip) Explain(ctx context.Context, req *pipeline.ExplainRequest) (*p
 				break
 			}
 
-			finding := pipeline.TaintFinding{
+			finding := collection.TaintFinding{
 				Category: edge.GetPropString("category"),
 				SinkLine: node.GetPropInt("line"),
 			}
@@ -2069,12 +2020,12 @@ func (trip *Trip) Explain(ctx context.Context, req *pipeline.ExplainRequest) (*p
 			}
 			if src != nil {
 				finding.SourceLine = src.GetPropInt("line")
-				finding.HopPath = append(finding.HopPath, pipeline.HopInfo{
+				finding.HopPath = append(finding.HopPath, collection.HopInfo{
 					NodeID: src.ID,
 					Line:   src.GetPropInt("line"),
 				})
 			}
-			finding.HopPath = append(finding.HopPath, pipeline.HopInfo{
+			finding.HopPath = append(finding.HopPath, collection.HopInfo{
 				NodeID: node.ID,
 				Line:   node.GetPropInt("line"),
 			})
@@ -2093,7 +2044,7 @@ func (trip *Trip) Explain(ctx context.Context, req *pipeline.ExplainRequest) (*p
 						slog.Warn("explain: failed to get sanitize node", "node_id", oe.Target, "error", err)
 					}
 					if sanNode != nil {
-						finding.HopPath = append(finding.HopPath, pipeline.HopInfo{
+						finding.HopPath = append(finding.HopPath, collection.HopInfo{
 							NodeID: sanNode.ID,
 							Line:   sanNode.GetPropInt("line"),
 						})
@@ -2105,7 +2056,7 @@ func (trip *Trip) Explain(ctx context.Context, req *pipeline.ExplainRequest) (*p
 						slog.Warn("explain: failed to get taint path node", "node_id", oe.Target, "error", err)
 					}
 					if tgtNode != nil {
-						finding.HopPath = append(finding.HopPath, pipeline.HopInfo{
+						finding.HopPath = append(finding.HopPath, collection.HopInfo{
 							NodeID: tgtNode.ID,
 							Line:   tgtNode.GetPropInt("line"),
 						})
@@ -2122,7 +2073,7 @@ func (trip *Trip) Explain(ctx context.Context, req *pipeline.ExplainRequest) (*p
 }
 
 // Search performs search
-func (trip *Trip) Search(ctx context.Context, req *pipeline.SearchRequest) (*pipeline.SearchResult, error) {
+func (trip *Trip) Search(ctx context.Context, req *collection.SearchRequest) (*collection.SearchResult, error) {
 	ctx = withRequestID(ctx, newRequestID())
 	if err := req.Validate(); err != nil {
 		return nil, err
@@ -2141,7 +2092,7 @@ func (trip *Trip) Search(ctx context.Context, req *pipeline.SearchRequest) (*pip
 		limit = 20
 	}
 
-	result := &pipeline.SearchResult{}
+	result := &collection.SearchResult{}
 
 	if req.Semantic {
 		// Semantic search: prefer dual-modal HNSW, fallback to BM25 if no embed data
@@ -2162,7 +2113,7 @@ func (trip *Trip) Search(ctx context.Context, req *pipeline.SearchRequest) (*pip
 				return nil, fmt.Errorf("hybrid search: %w", err)
 			}
 			for _, item := range hr.Results {
-				result.Results = append(result.Results, pipeline.SearchItem{
+				result.Results = append(result.Results, collection.SearchItem{
 					NodeID:    item.NodeID,
 					Name:      item.Name,
 					Kind:      item.Label,
@@ -2186,7 +2137,7 @@ func (trip *Trip) Search(ctx context.Context, req *pipeline.SearchRequest) (*pip
 				return nil, fmt.Errorf("bm25 search: %w", err)
 			}
 			for _, sr := range results {
-				result.Results = append(result.Results, pipeline.SearchItem{
+				result.Results = append(result.Results, collection.SearchItem{
 					NodeID:    sr.NodeID,
 					Name:      sr.Name,
 					Kind:      sr.Label,
@@ -2209,7 +2160,7 @@ func (trip *Trip) Search(ctx context.Context, req *pipeline.SearchRequest) (*pip
 			return nil, fmt.Errorf("bm25 search: %w", err)
 		}
 		for _, sr := range results {
-			result.Results = append(result.Results, pipeline.SearchItem{
+			result.Results = append(result.Results, collection.SearchItem{
 				NodeID:    sr.NodeID,
 				Name:      sr.Name,
 				Kind:      sr.Label,
@@ -2375,7 +2326,7 @@ func (trip *Trip) GroupImpact(ctx context.Context, req *GroupImpactRequest) (*Gr
 	// Fallback implementation
 	result := &GroupImpactResult{}
 
-	localResult, err := trip.Impact(ctx, &pipeline.ImpactRequest{
+	localResult, err := trip.Impact(ctx, &collection.ImpactRequest{
 		Target:    req.Target,
 		Direction: req.Direction,
 		MaxDepth:  3,
@@ -2498,24 +2449,8 @@ type RepoStatusInfo struct {
 	LastIndex string
 }
 
-// Param represents query parameter
-type Param struct {
-	Key   string
-	Value any
-}
 
-// QueryResult represents query result
-type QueryResult struct {
-	Columns []string
-	Rows    []map[string]any
-}
 
-// CypherResult represents Cypher query result
-type CypherResult struct {
-	Columns []string
-	Rows    []map[string]any
-	Stats   map[string]int
-}
 
 // ============ Cross-Repo Group Types ============
 
@@ -2550,7 +2485,7 @@ type GroupImpactRequest struct {
 // GroupImpactResult represents cross-repo impact analysis result
 type GroupImpactResult struct {
 	Risk          string
-	LocalImpact   *pipeline.ImpactResult
+	LocalImpact   *collection.ImpactResult
 	CrossRepoRefs []CrossRepoRef
 }
 
@@ -2582,70 +2517,70 @@ func (r *GroupImpactRequest) Validate() error {
 // ============ Tool Request/Response Types ============
 
 // ImpactRequest represents impact analysis request
-type ImpactRequest = pipeline.ImpactRequest
+type ImpactRequest = collection.ImpactRequest
 
 // ImpactResult represents impact analysis result
-type ImpactResult = pipeline.ImpactResult
+type ImpactResult = collection.ImpactResult
 
 // ContextRequest represents 360-degree symbol view request
-type ContextRequest = pipeline.ContextRequest
+type ContextRequest = collection.ContextRequest
 
 // ContextResult represents 360-degree symbol view result
-type ContextResult = pipeline.ContextResult
+type ContextResult = collection.ContextResult
 
 // CheckRequest represents structure check request
-type CheckRequest = pipeline.CheckRequest
+type CheckRequest = collection.CheckRequest
 
 // CheckResult represents structure check result
-type CheckResult = pipeline.CheckResult
+type CheckResult = collection.CheckResult
 
 // SearchRequest represents search request
-type SearchRequest = pipeline.SearchRequest
+type SearchRequest = collection.SearchRequest
 
 // SearchResult represents search result
-type SearchResult = pipeline.SearchResult
+type SearchResult = collection.SearchResult
 
 // RenameRequest represents multi-file coordinated rename request
-type RenameRequest = pipeline.RenameRequest
+type RenameRequest = collection.RenameRequest
 
 // RenameResult represents rename result
-type RenameResult = pipeline.RenameResult
+type RenameResult = collection.RenameResult
 
 // DetectChangesRequest represents change detection request
-type DetectChangesRequest = pipeline.DetectChangesRequest
+type DetectChangesRequest = collection.DetectChangesRequest
 
 // DetectChangesResult represents change detection result
-type DetectChangesResult = pipeline.DetectChangesResult
+type DetectChangesResult = collection.DetectChangesResult
 
 // RouteMapRequest represents route mapping request
-type RouteMapRequest = pipeline.RouteMapRequest
+type RouteMapRequest = collection.RouteMapRequest
 
 // RouteMapResult represents route mapping result
-type RouteMapResult = pipeline.RouteMapResult
+type RouteMapResult = collection.RouteMapResult
 
 // ToolMapRequest represents tool mapping request
-type ToolMapRequest = pipeline.ToolMapRequest
+type ToolMapRequest = collection.ToolMapRequest
 
 // ToolMapResult represents tool mapping result
-type ToolMapResult = pipeline.ToolMapResult
+type ToolMapResult = collection.ToolMapResult
 
 // ShapeCheckRequest represents response shape check request
-type ShapeCheckRequest = pipeline.ShapeCheckRequest
+type ShapeCheckRequest = collection.ShapeCheckRequest
 
 // ShapeCheckResult represents response shape check result
-type ShapeCheckResult = pipeline.ShapeCheckResult
+type ShapeCheckResult = collection.ShapeCheckResult
 
 // ApiImpactRequest represents API impact analysis request
-type ApiImpactRequest = pipeline.ApiImpactRequest
+type ApiImpactRequest = collection.ApiImpactRequest
 
 // ApiImpactResult represents API impact analysis result
-type ApiImpactResult = pipeline.ApiImpactResult
+type ApiImpactResult = collection.ApiImpactResult
 
 // ExplainRequest represents taint explanation request
-type ExplainRequest = pipeline.ExplainRequest
+type ExplainRequest = collection.ExplainRequest
 
 // ExplainResult represents taint explanation result
-type ExplainResult = pipeline.ExplainResult
+type ExplainResult = collection.ExplainResult
 
 // CrossRepoRef represents cross-repo reference
 type CrossRepoRef struct {
@@ -2678,16 +2613,22 @@ func (trip *Trip) registerBuiltinPhases() {
 
 // registerBuiltinProviders registers built-in language providers.
 func (trip *Trip) registerBuiltinProviders() {
-	trip.languageProviders[graph.LabelGoFile] = lang.NewGoProvider()
-	trip.languageProviders[graph.LabelPythonFile] = lang.NewPythonProvider()
-	trip.languageProviders[graph.LabelTSFile] = lang.NewTypeScriptProvider()
-	trip.languageProviders[graph.LabelJSFile] = lang.NewJavaScriptProvider()
-	trip.languageProviders[graph.LabelRustFile] = lang.NewRustProvider()
-	trip.languageProviders[graph.LabelCFile] = lang.NewCProvider()
-	trip.languageProviders[graph.LabelCPPFile] = lang.NewCPPProvider()
-	trip.languageProviders[graph.LabelCSharpFile] = lang.NewCSharpProvider()
-	trip.languageProviders[graph.LabelJavaFile] = lang.NewJavaProvider()
-	trip.languageProviders[graph.LabelMarkdownFile] = lang.NewMarkdownProvider()
+	trip.languageProviders[graph.LabelGoFile] = languages.NewGoProvider()
+	trip.languageProviders[graph.LabelPythonFile] = languages.NewPythonProvider()
+	trip.languageProviders[graph.LabelTSFile] = languages.NewTypeScriptProvider()
+	trip.languageProviders[graph.LabelJSFile] = languages.NewJavaScriptProvider()
+	trip.languageProviders[graph.LabelRustFile] = languages.NewRustProvider()
+	trip.languageProviders[graph.LabelCFile] = languages.NewCProvider()
+	trip.languageProviders[graph.LabelCPPFile] = languages.NewCPPProvider()
+	trip.languageProviders[graph.LabelCSharpFile] = languages.NewCSharpProvider()
+	trip.languageProviders[graph.LabelJavaFile] = languages.NewJavaProvider()
+	trip.languageProviders[graph.LabelMarkdownFile] = languages.NewMarkdownProvider()
+}
+
+// registerBuiltinScopeResolvers registers built-in scope resolvers.
+func (trip *Trip) registerBuiltinScopeResolvers() {
+	goProvider := trip.languageProviders[graph.LabelGoFile].(*languages.GoProvider)
+	trip.scopeResolvers[graph.LabelGoFile] = languages.NewGoScopeResolver(goProvider)
 }
 
 // registerBuiltinTools registers built-in tools
@@ -2717,7 +2658,7 @@ type impactTool struct{}
 
 func (t *impactTool) Name() string { return "impact" }
 func (t *impactTool) Run(ctx context.Context, trip *Trip, req interface{}) (interface{}, error) {
-	r, ok := req.(*pipeline.ImpactRequest)
+	r, ok := req.(*collection.ImpactRequest)
 	if !ok {
 		return nil, fmt.Errorf("%w: expected ImpactRequest", ErrInvalidRequest)
 	}
@@ -2729,7 +2670,7 @@ type contextTool struct{}
 
 func (t *contextTool) Name() string { return "context" }
 func (t *contextTool) Run(ctx context.Context, trip *Trip, req interface{}) (interface{}, error) {
-	r, ok := req.(*pipeline.ContextRequest)
+	r, ok := req.(*collection.ContextRequest)
 	if !ok {
 		return nil, fmt.Errorf("%w: expected ContextRequest", ErrInvalidRequest)
 	}
@@ -2741,7 +2682,7 @@ type detectChangesTool struct{}
 
 func (t *detectChangesTool) Name() string { return "detect_changes" }
 func (t *detectChangesTool) Run(ctx context.Context, trip *Trip, req interface{}) (interface{}, error) {
-	r, ok := req.(*pipeline.DetectChangesRequest)
+	r, ok := req.(*collection.DetectChangesRequest)
 	if !ok {
 		return nil, fmt.Errorf("%w: expected DetectChangesRequest", ErrInvalidRequest)
 	}
@@ -2753,7 +2694,7 @@ type renameTool struct{}
 
 func (t *renameTool) Name() string { return "rename" }
 func (t *renameTool) Run(ctx context.Context, trip *Trip, req interface{}) (interface{}, error) {
-	r, ok := req.(*pipeline.RenameRequest)
+	r, ok := req.(*collection.RenameRequest)
 	if !ok {
 		return nil, fmt.Errorf("%w: expected RenameRequest", ErrInvalidRequest)
 	}
@@ -2765,7 +2706,7 @@ type routeMapTool struct{}
 
 func (t *routeMapTool) Name() string { return "route_map" }
 func (t *routeMapTool) Run(ctx context.Context, trip *Trip, req interface{}) (interface{}, error) {
-	r, ok := req.(*pipeline.RouteMapRequest)
+	r, ok := req.(*collection.RouteMapRequest)
 	if !ok {
 		return nil, fmt.Errorf("%w: expected RouteMapRequest", ErrInvalidRequest)
 	}
@@ -2777,7 +2718,7 @@ type toolMapTool struct{}
 
 func (t *toolMapTool) Name() string { return "tool_map" }
 func (t *toolMapTool) Run(ctx context.Context, trip *Trip, req interface{}) (interface{}, error) {
-	r, ok := req.(*pipeline.ToolMapRequest)
+	r, ok := req.(*collection.ToolMapRequest)
 	if !ok {
 		return nil, fmt.Errorf("%w: expected ToolMapRequest", ErrInvalidRequest)
 	}
@@ -2789,7 +2730,7 @@ type shapeCheckTool struct{}
 
 func (t *shapeCheckTool) Name() string { return "shape_check" }
 func (t *shapeCheckTool) Run(ctx context.Context, trip *Trip, req interface{}) (interface{}, error) {
-	r, ok := req.(*pipeline.ShapeCheckRequest)
+	r, ok := req.(*collection.ShapeCheckRequest)
 	if !ok {
 		return nil, fmt.Errorf("%w: expected ShapeCheckRequest", ErrInvalidRequest)
 	}
@@ -2801,7 +2742,7 @@ type apiImpactTool struct{}
 
 func (t *apiImpactTool) Name() string { return "api_impact" }
 func (t *apiImpactTool) Run(ctx context.Context, trip *Trip, req interface{}) (interface{}, error) {
-	r, ok := req.(*pipeline.ApiImpactRequest)
+	r, ok := req.(*collection.ApiImpactRequest)
 	if !ok {
 		return nil, fmt.Errorf("%w: expected APIImpactRequest", ErrInvalidRequest)
 	}
@@ -2813,7 +2754,7 @@ type explainTool struct{}
 
 func (t *explainTool) Name() string { return "explain" }
 func (t *explainTool) Run(ctx context.Context, trip *Trip, req interface{}) (interface{}, error) {
-	r, ok := req.(*pipeline.ExplainRequest)
+	r, ok := req.(*collection.ExplainRequest)
 	if !ok {
 		return nil, fmt.Errorf("%w: expected ExplainRequest", ErrInvalidRequest)
 	}
@@ -2825,7 +2766,7 @@ type searchTool struct{}
 
 func (t *searchTool) Name() string { return "search" }
 func (t *searchTool) Run(ctx context.Context, trip *Trip, req interface{}) (interface{}, error) {
-	r, ok := req.(*pipeline.SearchRequest)
+	r, ok := req.(*collection.SearchRequest)
 	if !ok {
 		return nil, fmt.Errorf("%w: expected SearchRequest", ErrInvalidRequest)
 	}
@@ -2869,7 +2810,7 @@ type checkTool struct{}
 
 func (t *checkTool) Name() string { return "check" }
 func (t *checkTool) Run(ctx context.Context, trip *Trip, req interface{}) (interface{}, error) {
-	r, ok := req.(*pipeline.CheckRequest)
+	r, ok := req.(*collection.CheckRequest)
 	if !ok {
 		return nil, fmt.Errorf("%w: expected CheckRequest", ErrInvalidRequest)
 	}

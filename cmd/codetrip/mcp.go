@@ -2,8 +2,6 @@ package main
 
 import (
 	"context"
-	"encoding/json"
-	"fmt"
 	"strings"
 
 	"github.com/mengshi02/codetrip"
@@ -44,12 +42,6 @@ func registerMCPTools(s *mcp.Server, flags *cliFlags) {
 		Name:        "index_repo",
 		Description: "Index a code repository into the codetrip graph database. This scans the repository, builds the code graph, and creates search indexes.",
 	}, makeIndexRepoHandler(flags))
-
-	// Query tool
-	mcp.AddTool(s, &mcp.Tool{
-		Name:        "cypher_query",
-		Description: "Execute a Cypher query against a repository's code graph. Use this to explore relationships between code symbols.",
-	}, makeQueryHandler(flags))
 
 	// Search tool
 	mcp.AddTool(s, &mcp.Tool{
@@ -176,10 +168,6 @@ type indexRepoInput struct {
 	PDG      bool   `json:"pdg" jsonschema:"Enable PDG construction"`
 }
 
-type cypherQueryInput struct {
-	Query string `json:"query" jsonschema:"required,Cypher query string"`
-	Repo  string `json:"repo" jsonschema:"required,Repository name to query against"`
-}
 
 type searchSymbolsInput struct {
 	Query    string `json:"query" jsonschema:"required,Search query string"`
@@ -189,10 +177,12 @@ type searchSymbolsInput struct {
 }
 
 type impactAnalysisInput struct {
-	Target    string `json:"target" jsonschema:"required,Symbol name to analyze impact for"`
-	Repo      string `json:"repo" jsonschema:"required,Repository name"`
-	Direction string `json:"direction" jsonschema:"Traversal direction: 'downstream' or 'upstream' (default: downstream)"`
-	MaxDepth  int    `json:"max_depth" jsonschema:"Maximum traversal depth (default: 3)"`
+	Target      string `json:"target" jsonschema:"required,Symbol name to analyze impact for"`
+	Repo        string `json:"repo" jsonschema:"required,Repository name"`
+	Direction   string `json:"direction" jsonschema:"Traversal direction: 'downstream' or 'upstream' (default: downstream)"`
+	MaxDepth    int    `json:"max_depth" jsonschema:"Maximum traversal depth (default: 3)"`
+	Granularity string `json:"granularity" jsonschema:"Output granularity: 'summary' (risk+counts), 'symbol' (per-symbol detail), 'path' (full traversal paths with line numbers)"`
+	EdgeFilter  string `json:"edge_filter" jsonschema:"Edge type filter: 'all' (default), 'calls_only' (only CALLS edges), 'semantic' (CALLS+IMPLEMENTS+EXTENDS+ACCESSES etc, excludes DEFINES/CONTAINS)"`
 }
 
 type symbolContextInput struct {
@@ -202,8 +192,9 @@ type symbolContextInput struct {
 }
 
 type detectChangesInput struct {
-	Scope string `json:"scope" jsonschema:"required,Directory path to check for changes"`
-	Repo  string `json:"repo" jsonschema:"required,Repository name"`
+	Scope   string `json:"scope" jsonschema:"required,Directory path to check for changes"`
+	BaseRef string `json:"base_ref" jsonschema:"required,Git ref (branch/commit) to compare against (e.g. main, HEAD~1)"`
+	Repo    string `json:"repo" jsonschema:"required,Repository name"`
 }
 
 type structuralCheckInput struct {
@@ -325,39 +316,8 @@ func makeIndexRepoHandler(flags *cliFlags) func(ctx context.Context, req *mcp.Ca
 	}
 }
 
-func makeQueryHandler(flags *cliFlags) func(ctx context.Context, req *mcp.CallToolRequest, input cypherQueryInput) (*mcp.CallToolResult, textOutput, error) {
-	return func(ctx context.Context, req *mcp.CallToolRequest, input cypherQueryInput) (*mcp.CallToolResult, textOutput, error) {
-		trip, err := flags.openTripForRepo(input.Repo)
-		if err != nil {
-			return nil, textOutput{}, err
-		}
-		defer trip.Close()
 
-		result, err := utils.Query(ctx, trip, input.Query, input.Repo)
-		if err != nil {
-			return nil, textOutput{}, err
-		}
 
-		out := map[string]any{
-			"columns": result.Columns,
-			"rows":    len(result.Rows),
-		}
-		if len(result.Rows) > 0 {
-			formattedRows := make([]map[string]string, len(result.Rows))
-			for i, row := range result.Rows {
-				fr := make(map[string]string)
-				for _, col := range result.Columns {
-					fr[col] = utils.FormatValue(row[col])
-				}
-				formattedRows[i] = fr
-			}
-			out["data"] = formattedRows
-		}
-
-		b, _ := json.MarshalIndent(out, "", "  ")
-		return nil, textOutput{Text: string(b)}, nil
-	}
-}
 
 func makeSearchHandler(flags *cliFlags) func(ctx context.Context, req *mcp.CallToolRequest, input searchSymbolsInput) (*mcp.CallToolResult, textOutput, error) {
 	return func(ctx context.Context, req *mcp.CallToolRequest, input searchSymbolsInput) (*mcp.CallToolResult, textOutput, error) {
@@ -411,12 +371,18 @@ func makeImpactHandler(flags *cliFlags) func(ctx context.Context, req *mcp.CallT
 		if maxDepth <= 0 {
 			maxDepth = 3
 		}
+		granularity := input.Granularity
+		if granularity == "" {
+			granularity = "summary"
+		}
 
 		impactReq := &codetrip.ImpactRequest{
-			Target:    input.Target,
-			Repo:      input.Repo,
-			Direction: direction,
-			MaxDepth:  maxDepth,
+			Target:      input.Target,
+			Repo:        input.Repo,
+			Direction:   direction,
+			MaxDepth:    maxDepth,
+			Granularity: granularity,
+			EdgeFilter:  input.EdgeFilter,
 		}
 
 		result, err := utils.Impact(ctx, trip, impactReq)
@@ -462,8 +428,9 @@ func makeDetectChangesHandler(flags *cliFlags) func(ctx context.Context, req *mc
 		defer trip.Close()
 
 		detectReq := &codetrip.DetectChangesRequest{
-			Scope: input.Scope,
-			Repo:  input.Repo,
+			Scope:   input.Scope,
+			BaseRef: input.BaseRef,
+			Repo:    input.Repo,
 		}
 
 		result, err := utils.DetectChanges(ctx, trip, detectReq)

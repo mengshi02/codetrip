@@ -11,7 +11,7 @@ import (
 	"time"
 
 	"github.com/mengshi02/codetrip"
-	"github.com/mengshi02/codetrip/internal/pipeline"
+	"github.com/mengshi02/codetrip/internal/collection"
 )
 
 // helper: create a temp directory with Go source files
@@ -113,7 +113,7 @@ func TestIndexRepoSearchImpact(t *testing.T) {
 		result.Repo, result.Files, result.Nodes, result.Edges, result.Duration)
 
 	// Step 2: Search
-	searchResult, err := trip.Search(ctx, &pipeline.SearchRequest{
+	searchResult, err := trip.Search(ctx, &collection.SearchRequest{
 		Query: "Hello",
 		Repo:  "testrepo",
 		Limit: 10,
@@ -124,7 +124,7 @@ func TestIndexRepoSearchImpact(t *testing.T) {
 	t.Logf("search 'Hello': %d results", len(searchResult.Results))
 
 	// Step 3: Impact
-	impactResult, err := trip.Impact(ctx, &pipeline.ImpactRequest{
+	impactResult, err := trip.Impact(ctx, &collection.ImpactRequest{
 		Target:    "Hello",
 		Repo:      "testrepo",
 		Direction: "downstream",
@@ -267,39 +267,6 @@ func TestCrashRecovery(t *testing.T) {
 	t.Logf("crash recovery: found %d repos", len(repos))
 }
 
-// ============ Test 5: Cypher timeout protection ============
-
-func TestCypherTimeout(t *testing.T) {
-	trip := openTrip(t)
-	repoPath := createTestRepo(t, "cyphertest")
-
-	ctx := context.Background()
-
-	// Index first
-	_, err := trip.IndexRepo(ctx, repoPath, codetrip.WithRepoName("cyphertest"))
-	if err != nil {
-		t.Fatalf("index repo: %v", err)
-	}
-
-	// Run a simple Cypher query
-	result, err := trip.Cypher(ctx, "MATCH (n) RETURN n LIMIT 5")
-	if err != nil {
-		t.Logf("cypher query: %v (may be expected if no nodes match)", err)
-	} else {
-		t.Logf("cypher: %d rows", len(result.Rows))
-	}
-
-	// Run with a very short timeout to verify timeout mechanism
-	shortCtx, cancel := context.WithTimeout(context.Background(), 1*time.Nanosecond)
-	defer cancel()
-
-	_, err = trip.Cypher(shortCtx, "MATCH (n) RETURN n")
-	if err == nil {
-		t.Log("cypher with nanosecond timeout did not error (possible race — acceptable)")
-	} else {
-		t.Logf("cypher timeout correctly triggered: %v", err)
-	}
-}
 
 // ============ Test 6: Verify consistency check ============
 

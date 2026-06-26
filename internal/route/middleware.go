@@ -5,7 +5,7 @@ import (
 	"strings"
 
 	"github.com/mengshi02/codetrip/internal/graph"
-	"github.com/mengshi02/codetrip/internal/pipeline"
+	"github.com/mengshi02/codetrip/internal/collection"
 )
 
 // MiddlewareChainExtractor middleware chain extractor
@@ -22,7 +22,7 @@ func (e *MiddlewareChainExtractor) Framework() string { return "middleware" }
 
 // Extract implements RouteExtractor
 // Middleware extractor produces virtual routes (Method=MIDDLEWARE) to record middleware chains
-func (e *MiddlewareChainExtractor) Extract(ctx context.Context, g *graph.GraphStore, files []*pipeline.ParsedFile) ([]*Route, error) {
+func (e *MiddlewareChainExtractor) Extract(ctx context.Context, g *graph.GraphStore, files []*collection.ParsedFile) ([]*Route, error) {
 	slice := acquireRouteSlice()
 	defer releaseRouteSlice(slice)
 
@@ -42,7 +42,7 @@ func (e *MiddlewareChainExtractor) Extract(ctx context.Context, g *graph.GraphSt
 	return result, nil
 }
 
-func (e *MiddlewareChainExtractor) extractFromFile(f *pipeline.ParsedFile, g *graph.GraphStore) []*Route {
+func (e *MiddlewareChainExtractor) extractFromFile(f *collection.ParsedFile, g *graph.GraphStore) []*Route {
 	var routes []*Route
 
 	for _, call := range f.CallSites {
@@ -82,7 +82,7 @@ type middlewareCallInfo struct {
 }
 
 // parseMiddlewareCall parses middleware call from call site
-func parseMiddlewareCall(call *pipeline.CallSite) *middlewareCallInfo {
+func parseMiddlewareCall(call *collection.CallSite) *middlewareCallInfo {
 	switch {
 	// Express/Koa: app.use(), router.use()
 	case call.Name == "use" &&

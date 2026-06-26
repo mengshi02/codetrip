@@ -4,21 +4,21 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/mengshi02/codetrip/internal/collection"
 	"github.com/mengshi02/codetrip/internal/graph"
-	"github.com/mengshi02/codetrip/internal/pipeline"
 	"github.com/odvcencio/gotreesitter"
 )
 
 // ============ Extension Interfaces ============
 
 // ImportSemantics defines import semantic strategies
-type ImportSemantics = pipeline.ImportSemantics
+type ImportSemantics = collection.ImportSemantics
 
 const (
-	ImportSemanticsNamed              = pipeline.ImportSemanticsNamed
-	ImportSemanticsWildcardLeaf       = pipeline.ImportSemanticsWildcardLeaf
-	ImportSemanticsWildcardTransitive = pipeline.ImportSemanticsWildcardTransitive
-	ImportSemanticsNamespace          = pipeline.ImportSemanticsNamespace
+	ImportSemanticsNamed              = collection.ImportSemanticsNamed
+	ImportSemanticsWildcardLeaf       = collection.ImportSemanticsWildcardLeaf
+	ImportSemanticsWildcardTransitive = collection.ImportSemanticsWildcardTransitive
+	ImportSemanticsNamespace          = collection.ImportSemanticsNamespace
 )
 
 // LanguageProvider is the language provider interface.
@@ -28,6 +28,11 @@ const (
 // Providers can implement the minimal interface (QuerySet only) and the
 // default SharedInterpreter will handle capture-to-struct conversion,
 // or implement InterpretXxx methods for language-specific synthesis logic.
+//
+// Providers may additionally implement ScopeCaptureProvider (ParseFile method)
+// to use runtime AST synthesis instead of the legacy query-execute-and-interpret
+// path. When ParseFile is present, the parse phase calls it directly and skips
+// the five separate QuerySet+InterpretXxx steps.
 type LanguageProvider interface {
 	Language() graph.Label
 
@@ -35,61 +40,70 @@ type LanguageProvider interface {
 	// Each query targets a specific extraction dimension (scope, declaration,
 	// import, type-binding, reference). The parse phase executes each query
 	// against the same AST and passes captures to the corresponding Interpret method.
-	QuerySet() *pipeline.LangQuerySet
+	//
+	// NOTE: Providers that implement ScopeCaptureProvider (ParseFile) may return
+	// an empty/minimal QuerySet since the parse phase will call ParseFile directly
+	// and skip the query+interpret flow.
+	QuerySet() *collection.LangQuerySet
 
 	// InterpretScope synthesizes ScopeInfo from scope query captures.
-	InterpretScope(captures []pipeline.LangCapture, source []byte, filePath string) []*pipeline.ScopeInfo
+	InterpretScope(captures []collection.LangCapture, source []byte, filePath string) []*collection.ScopeInfo
 	// InterpretDeclaration synthesizes SymbolInfo from declaration query captures.
-	InterpretDeclaration(captures []pipeline.LangCapture, source []byte, filePath string) []*pipeline.SymbolInfo
+	InterpretDeclaration(captures []collection.LangCapture, source []byte, filePath string) []*collection.SymbolInfo
 	// InterpretImport synthesizes ImportInfo from import query captures.
-	InterpretImport(captures []pipeline.LangCapture, source []byte, filePath string) []*pipeline.ImportInfo
+	InterpretImport(captures []collection.LangCapture, source []byte, filePath string) []*collection.ImportInfo
 	// InterpretTypeBinding synthesizes TypeBindingInfo from type-binding query captures.
-	InterpretTypeBinding(captures []pipeline.LangCapture, source []byte, filePath string) []*pipeline.TypeBindingInfo
+	InterpretTypeBinding(captures []collection.LangCapture, source []byte, filePath string) []*collection.TypeBindingInfo
 	// InterpretReference synthesizes ReferenceInfo from reference query captures.
-	InterpretReference(captures []pipeline.LangCapture, source []byte, filePath string) []*pipeline.ReferenceInfo
+	InterpretReference(captures []collection.LangCapture, source []byte, filePath string) []*collection.ReferenceInfo
 
 	// TreeSitterLanguage returns the tree-sitter Language for this provider.
 	TreeSitterLanguage() *gotreesitter.Language
 
 	ImportSemantics() ImportSemantics
+}
 
-	// Legacy methods retained for backward compatibility with ScopeResolver.
-	Captures() *pipeline.LangCapturesConfig
-	CallExtractConfig() *pipeline.LangCallExtractConfig
-	ClassExtractConfig() *pipeline.LangClassExtractConfig
-	FieldExtractConfig() *pipeline.LangFieldExtractConfig
-	ImportResolveConfig() *pipeline.LangImportResolveConfig
-	Interpret(captures *pipeline.LangCaptureResult) (*pipeline.LangInterpretResult, error)
+// ScopeCaptureProvider is an optional interface that language providers may
+// implement to use runtime AST synthesis (emitScopeCaptures pattern) instead
+// of the legacy QuerySet + InterpretXxx pattern.
+//
+// When a provider implements this interface, the parse phase calls ParseFile
+// directly and skips the query-execute-and-interpret flow entirely.
+// This mirrors GitNexus's emitScopeCaptures hook — a provider with ParseFile
+// does its own AST walk and capture synthesis internally.
+type ScopeCaptureProvider interface {
+	LanguageProvider
+	ParseFile(f *collection.ParsedFile)
 }
 
 // BindingSet is re-exported from the pipeline package.
 // It represents a set of bindings (symbol name → candidate node ID list).
-type BindingSet = pipeline.BindingSet
+type BindingSet = collection.BindingSet
 
-// NewBindingSet creates an empty binding set (delegates to pipeline.NewBindingSet)
-var NewBindingSet = pipeline.NewBindingSet
+// NewBindingSet creates an empty binding set (delegates to collection.NewBindingSet)
+var NewBindingSet = collection.NewBindingSet
 
 // ============ Concrete Type Aliases (replacing interface{} in ScopeResolver) ============
 
 // ScopeModel is the concrete type for semantic model parameters.
-// Providers should type-assert to *pipeline.MutableSemanticModel or *pipeline.SemanticModel as needed.
-type ScopeModel = pipeline.MutableSemanticModel
+// Providers should type-assert to *collection.MutableSemanticModel or *collection.SemanticModel as needed.
+type ScopeModel = collection.MutableSemanticModel
 
 // ImportRef is the concrete type for import parameters.
-// Providers should type-assert to *pipeline.ImportInfo or *pipeline.ImportEntry as needed.
-type ImportRef = pipeline.ImportInfo
+// Providers should type-assert to *collection.ImportInfo or *collection.ImportEntry as needed.
+type ImportRef = collection.ImportInfo
 
 // CallSiteRef is the concrete type for call site parameters.
-type CallSiteRef = pipeline.CallSite
+type CallSiteRef = collection.CallSite
 
 // FileSet is the concrete type for file list parameters.
-type FileSet = []*pipeline.ParsedFile
+type FileSet = []*collection.ParsedFile
 
 // IndexSet is the concrete type for scope resolution index parameters.
-type IndexSet = pipeline.ScopeResolutionIndexes
+type IndexSet = collection.ScopeResolutionIndexes
 
 // ScopeMapType is the concrete type for scope map parameters.
-type ScopeMapType = pipeline.ScopeResolutionIndexes
+type ScopeMapType = collection.ScopeResolutionIndexes
 
 // ============ ScopeResolver — Split into composed interfaces (ISP) ============
 
@@ -140,16 +154,16 @@ type ScopeResolver interface {
 }
 
 // RangeBindContext provides context for for-range variable binding (re-exported from pipeline)
-type RangeBindContext = pipeline.RangeBindContext
+type RangeBindContext = collection.RangeBindContext
 
 // ScopeContextOptions provides options for scope context (re-exported from pipeline)
-type ScopeContextOptions = pipeline.ScopeContextOptions
+type ScopeContextOptions = collection.ScopeContextOptions
 
 // EmitContext provides context for post-processing edge emission (re-exported from pipeline)
-type EmitContext = pipeline.EmitContext
+type EmitContext = collection.EmitContext
 
 // GraphNodeLookup is a function type for looking up graph nodes (re-exported from pipeline)
-type GraphNodeLookup = pipeline.GraphNodeLookup
+type GraphNodeLookup = collection.GraphNodeLookup
 
 // ============ Generic Tool Interface (1.2) ============
 

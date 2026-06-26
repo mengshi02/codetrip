@@ -3,14 +3,14 @@ package codetrip
 import (
 	"time"
 
-	"github.com/mengshi02/codetrip/internal/pipeline"
+	"github.com/mengshi02/codetrip/internal/ingestion"
 	"github.com/mengshi02/codetrip/internal/store"
 )
 
 // options represents engine options
 type options struct {
 	cacheSize          int64
-	phases             []pipeline.Phase
+	phases             []ingestion.Phase
 	maxConcurrentIndex int
 	autoMigrate        bool              // automatically migrate schema on version mismatch
 	nodeCacheSize      int               // LRU node cache capacity (default: 500000)
@@ -19,7 +19,6 @@ type options struct {
 	quantInt8          bool              // enable int8 vector quantization (default: false)
 	twoStageSearch     bool              // enable two-stage search: int8 coarse + float32 refine (default: false)
 	bm25ChunkSize      int               // BM25 batch chunk size for large repos (default: 0 = auto 10000)
-	cypherTimeout      time.Duration     // default timeout for Cypher queries (default: 30s)
 }
 
 // Option is an engine configuration option function
@@ -33,7 +32,6 @@ func defaultOptions() options {
 		nodeCacheSize:      500000, // 500K entries (~200MB)
 		traversalLimit:     100000, // 100K nodes max
 		scalePreset:        store.ScaleSmall,
-		cypherTimeout:      30 * time.Second, // 30s default Cypher timeout
 	}
 }
 
@@ -61,7 +59,7 @@ func WithAutoMigrate(enabled bool) Option {
 }
 
 // WithPhase adds a custom Phase
-func WithPhase(phase pipeline.Phase) Option {
+func WithPhase(phase ingestion.Phase) Option {
 	return func(o *options) {
 		o.phases = append(o.phases, phase)
 	}
@@ -123,14 +121,6 @@ func WithBM25ChunkSize(size int) Option {
 	}
 }
 
-// WithCypherTimeout sets the default timeout for Cypher queries.
-// Default is 30 seconds. When a query exceeds this timeout, it returns ErrQueryTimeout.
-// Set to 0 to disable timeout (queries may run indefinitely on large graphs).
-func WithCypherTimeout(d time.Duration) Option {
-	return func(o *options) {
-		o.cypherTimeout = d
-	}
-}
 
 // ============ Index Options ============
 

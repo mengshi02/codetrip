@@ -68,16 +68,6 @@ func IndexRepoWithDefaults(ctx context.Context, tripDir, repoPath, repoName stri
 	return stats, time.Since(start), nil
 }
 
-// Query executes a Cypher query and returns the result.
-func Query(ctx context.Context, trip *codetrip.Trip, queryStr, repo string) (*codetrip.CypherResult, error) {
-	result, err := trip.Cypher(ctx, queryStr,
-		codetrip.Param{Key: "repo", Value: repo},
-	)
-	if err != nil {
-		return nil, fmt.Errorf("query error: %w", err)
-	}
-	return result, nil
-}
 
 // Search executes a symbol search and returns the result.
 func Search(ctx context.Context, trip *codetrip.Trip, req *codetrip.SearchRequest) (*codetrip.SearchResult, error) {

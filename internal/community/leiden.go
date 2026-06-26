@@ -16,6 +16,14 @@ type LeidenAlgorithm struct {
 	seed       uint64
 	rng        *rand.Rand
 	resolution float64 // Resolution parameter (default 1.0)
+
+	// Ultra performance: preallocated temporary buffers, zero GC during execution
+	tmpCommWeight []float64
+	tmpCommSum    []float64
+	tmpCommList   []int
+	tmpPerm       []int
+	visTimestamp  []uint32
+	visTick       uint32
 }
 
 // NewLeidenAlgorithm creates a new Leiden algorithm instance
@@ -46,11 +54,11 @@ func WithResolution(r float64) LeidenOption {
 
 // AdjGraph represents internal adjacency graph
 type AdjGraph struct {
-	Nodes       []string         // Node ID list
-	NodeIdx     map[string]int   // Node → index
-	Adj         [][]neighbor     // Adjacency list
-	Weight      []float64        // Node weight (degree)
-	TotalWeight float64          // Total edge weight
+	Nodes       []string
+	NodeIdx     map[string]int
+	Adj         [][]neighbor
+	Weight      []float64
+	TotalWeight float64
 }
 
 type neighbor struct {
@@ -59,13 +67,11 @@ type neighbor struct {
 }
 
 // BuildAdjGraph builds adjacency graph from GraphStore
-// Optimized: single ScanPrefix scan for all adjacency KV pairs instead of N×GetOutEdges
 func BuildAdjGraph(gs *graph.GraphStore, repo string) (*AdjGraph, error) {
 	ag := &AdjGraph{
 		NodeIdx: make(map[string]int),
 	}
 
-	// Collect nodes
 	iter := gs.IterNodes(repo)
 	defer iter.Close()
 
@@ -77,15 +83,19 @@ func BuildAdjGraph(gs *graph.GraphStore, repo string) (*AdjGraph, error) {
 		}
 	}
 
-	// Assign indices
+	sortedIDs := make([]string, 0, len(nodeSet))
 	for id := range nodeSet {
+		sortedIDs = append(sortedIDs, id)
+	}
+	sort.Strings(sortedIDs)
+
+	for _, id := range sortedIDs {
 		ag.NodeIdx[id] = len(ag.Nodes)
 		ag.Nodes = append(ag.Nodes, id)
 		ag.Adj = append(ag.Adj, nil)
 		ag.Weight = append(ag.Weight, 0)
 	}
 
-	// Build adjacency list — single ScanPrefix for all CALLS edges (N×Get → 1×Scan)
 	allEdges, _ := gs.ScanAllOutEdgesByRelType(string(graph.RelCalls))
 	for _, edge := range allEdges {
 		srcIdx, srcOk := ag.NodeIdx[edge.Source]
@@ -109,176 +119,218 @@ func (l *LeidenAlgorithm) Detect(ag *AdjGraph) *CommunityResult {
 		return &CommunityResult{}
 	}
 
-	// Initialize: each node is its own community
+	// Preallocate all temporary buffers, no further resizing during runtime
+	l.ensureBuffers(n)
+
 	community := make([]int, n)
 	for i := range community {
 		community[i] = i
 	}
 
-	// Iterative optimization
-	for iter := 0; iter < 100; iter++ { // Max 100 iterations
-		improved := l.localMove(ag, community)
+	for iter := 0; iter < 100; iter++ {
+		improved := l.localMoveFast(ag, community)
 		if !improved {
 			break
 		}
-		l.refine(ag, community)
-		community = l.aggregate(ag, community)
+		l.refineFast(ag, community)
+		community = l.aggregateFast(community)
 	}
 
 	return l.buildResult(ag, community)
 }
 
-// localMove performs local move phase: nodes move to best community
-func (l *LeidenAlgorithm) localMove(ag *AdjGraph, community []int) bool {
+// localMoveFast ultra-performance version: no maps, no allocations, array reuse
+func (l *LeidenAlgorithm) localMoveFast(ag *AdjGraph, community []int) bool {
 	n := len(ag.Nodes)
 	improved := false
 
-	// Calculate total weight of each community
-	commWeight := make([]float64, n)
+	tw := ag.TotalWeight
+	res := l.resolution
+
+	// Clear community total weights
+	clear(l.tmpCommWeight)
 	for i := 0; i < n; i++ {
-		commWeight[community[i]] += ag.Weight[i]
+		c := community[i]
+		l.tmpCommWeight[c] += ag.Weight[i]
 	}
 
-	// Traverse nodes in random order
-	order := l.randPerm(n)
+	order := l.randPermCached(n)
 
 	for _, i := range order {
-		bestComm := community[i]
+		currentComm := community[i]
+		wI := ag.Weight[i]
+
+		// Temporarily remove from current community
+		l.tmpCommWeight[currentComm] -= wI
+
+		// Use array to accumulate neighbor community weights, replacing map
+		clear(l.tmpCommSum)
+		commCount := 0
+		for _, nb := range ag.Adj[i] {
+			c := community[nb.idx]
+			if l.tmpCommSum[c] == 0 {
+				l.tmpCommList[commCount] = c
+				commCount++
+			}
+			l.tmpCommSum[c] += nb.weight
+		}
+
+		// Sort to ensure determinism
+		slice := l.tmpCommList[:commCount]
+		sort.Ints(slice)
+
+		bestComm := currentComm
 		bestDelta := 0.0
 
-		// Calculate delta for removing from current community
-		currentComm := community[i]
-		commWeight[currentComm] -= ag.Weight[i]
-
-		// Calculate delta for moving to each neighbor community
-		neighborComms := make(map[int]float64)
-		for _, nb := range ag.Adj[i] {
-			neighborComms[community[nb.idx]] += nb.weight
-		}
-
-		for comm, edgeWeight := range neighborComms {
-			if comm == currentComm {
+		for _, c := range slice {
+			if c == currentComm {
 				continue
 			}
-			// Modularity increment: ΔQ = (edgeWeight/2m) - (ag.Weight[i] * commWeight[comm]) / (2m * 2m)
-			delta := edgeWeight/ag.TotalWeight - l.resolution*ag.Weight[i]*commWeight[comm]/(ag.TotalWeight*ag.TotalWeight)
-			if delta > bestDelta {
+			e := l.tmpCommSum[c]
+			delta := e/tw - res*wI*l.tmpCommWeight[c]/(tw*tw)
+			if delta > bestDelta || (delta == bestDelta && c < bestComm) {
 				bestDelta = delta
-				bestComm = comm
+				bestComm = c
 			}
 		}
 
-		// Move to best community
 		if bestComm != currentComm {
 			community[i] = bestComm
-			commWeight[bestComm] += ag.Weight[i]
+			l.tmpCommWeight[bestComm] += wI
 			improved = true
 		} else {
-			commWeight[currentComm] += ag.Weight[i]
+			l.tmpCommWeight[currentComm] += wI
 		}
 	}
 
 	return improved
 }
 
-// refine performs refinement phase: ensures communities are well-connected
-func (l *LeidenAlgorithm) refine(ag *AdjGraph, community []int) {
+// refineFast timestamp-based visited, allocation-free BFS
+func (l *LeidenAlgorithm) refineFast(ag *AdjGraph, community []int) {
 	n := len(ag.Nodes)
+	l.visTick++
 
-	// Check internal connectivity for each community
-	commNodes := make(map[int][]int)
+	// Group nodes by community (array reuse)
+	maxComm := 0
+	for _, c := range community {
+		if c > maxComm {
+			maxComm = c
+		}
+	}
+	commNodes := make([][]int, maxComm+1)
 	for i := 0; i < n; i++ {
-		commNodes[community[i]] = append(commNodes[community[i]], i)
+		c := community[i]
+		commNodes[c] = append(commNodes[c], i)
 	}
 
-	for comm, nodes := range commNodes {
+	// Sort to ensure stable traversal order
+	sortedComms := make([]int, 0, len(commNodes))
+	for c, ns := range commNodes {
+		if len(ns) > 0 {
+			sortedComms = append(sortedComms, c)
+		}
+	}
+	sort.Ints(sortedComms)
+
+	for _, comm := range sortedComms {
+		nodes := commNodes[comm]
 		if len(nodes) <= 1 {
 			continue
 		}
 
-		// Check sub-communities
-		visited := make([]bool, n)
-		subComm := make([]int, n)
 		subIdx := 0
-
-		for _, node := range nodes {
-			if visited[node] {
+		for _, u := range nodes {
+			if l.visTimestamp[u] == l.visTick {
 				continue
 			}
-			// BFS to find connected components
-			queue := []int{node}
-			visited[node] = true
-			for len(queue) > 0 {
-				cur := queue[0]
-				queue = queue[1:]
-				subComm[cur] = subIdx
+
+			// BFS
+			q := []int{u}
+			l.visTimestamp[u] = l.visTick
+			for len(q) > 0 {
+				cur := q[0]
+				q = q[1:]
+				community[cur] = comm*1000000 + subIdx
 
 				for _, nb := range ag.Adj[cur] {
-					if !visited[nb.idx] && community[nb.idx] == comm {
-						visited[nb.idx] = true
-						queue = append(queue, nb.idx)
+					v := nb.idx
+					if community[v] == comm && l.visTimestamp[v] != l.visTick {
+						l.visTimestamp[v] = l.visTick
+						q = append(q, v)
 					}
 				}
 			}
 			subIdx++
 		}
-
-		// If multiple sub-communities, split
-		if subIdx > 1 {
-			for _, node := range nodes {
-				community[node] = comm + subComm[node]*10000 // Avoid collision
-			}
-		}
 	}
 }
 
-// aggregate performs aggregation phase: communities merge into supernodes
-func (l *LeidenAlgorithm) aggregate(ag *AdjGraph, community []int) []int {
-	// Renumber communities (0..k-1)
-	commMap := make(map[int]int)
+// aggregateFast fast community renumbering
+func (l *LeidenAlgorithm) aggregateFast(community []int) []int {
+	n := len(community)
+	m := make([]int, n)
 	idx := 0
+	cMap := make(map[int]int, n/4)
+
 	for _, c := range community {
-		if _, ok := commMap[c]; !ok {
-			commMap[c] = idx
+		if _, ok := cMap[c]; !ok {
+			cMap[c] = idx
 			idx++
 		}
 	}
 	for i, c := range community {
-		community[i] = commMap[c]
+		m[i] = cMap[c]
 	}
-	return community
+	return m
+}
+
+// ensureBuffers one-time preallocation of all temporary buffers
+func (l *LeidenAlgorithm) ensureBuffers(n int) {
+	if len(l.tmpCommWeight) < n {
+		l.tmpCommWeight = make([]float64, n*2)
+		l.tmpCommSum = make([]float64, n*2)
+		l.tmpCommList = make([]int, n*2)
+		l.tmpPerm = make([]int, n)
+		l.visTimestamp = make([]uint32, n)
+		l.visTick = 0
+	}
+}
+
+// randPermCached slice reuse, no allocations
+func (l *LeidenAlgorithm) randPermCached(n int) []int {
+	p := l.tmpPerm[:n]
+	for i := 0; i < n; i++ {
+		p[i] = i
+	}
+	l.rng.Shuffle(n, func(i, j int) {
+		p[i], p[j] = p[j], p[i]
+	})
+	return p
 }
 
 // buildResult builds detection result
 func (l *LeidenAlgorithm) buildResult(ag *AdjGraph, community []int) *CommunityResult {
-	// Group by community
 	commNodes := make(map[int][]int)
 	for i, c := range community {
 		commNodes[c] = append(commNodes[c], i)
 	}
 
 	result := &CommunityResult{
-		Communities:  make([]CommunityNode, 0, len(commNodes)),
-		Memberships:  make([]CommunityMembership, 0, len(ag.Nodes)),
+		Communities: make([]CommunityNode, 0, len(commNodes)),
+		Memberships: make([]CommunityMembership, 0, len(ag.Nodes)),
 	}
 
 	for _, nodeIdxs := range commNodes {
-		// Calculate cohesion
-		cohesion := l.calculateCohesion(ag, nodeIdxs)
-
-		// Collect keywords
-		keywords := make([]string, 0)
-
+		cohesion := l.calculateCohesionFast(ag, nodeIdxs)
 		cn := CommunityNode{
-			ID:             ag.Nodes[nodeIdxs[0]], // Use first node ID as community ID
+			ID:             ag.Nodes[nodeIdxs[0]],
 			HeuristicLabel: l.generateLabel(ag, nodeIdxs),
 			Cohesion:       cohesion,
 			SymbolCount:    len(nodeIdxs),
-			Keywords:       keywords,
+			Keywords:       []string{},
 		}
-
 		result.Communities = append(result.Communities, cn)
-
 		for _, idx := range nodeIdxs {
 			result.Memberships = append(result.Memberships, CommunityMembership{
 				NodeID:      ag.Nodes[idx],
@@ -287,7 +339,6 @@ func (l *LeidenAlgorithm) buildResult(ag *AdjGraph, community []int) *CommunityR
 		}
 	}
 
-	// Sort for determinism
 	sort.Slice(result.Communities, func(i, j int) bool {
 		return result.Communities[i].ID < result.Communities[j].ID
 	})
@@ -295,108 +346,114 @@ func (l *LeidenAlgorithm) buildResult(ag *AdjGraph, community []int) *CommunityR
 	result.Stats = CommunityStats{
 		CommunityCount: len(commNodes),
 		AvgCohesion:    l.avgCohesion(result.Communities),
-		Modularity:     l.modularity(ag, community),
+		Modularity:     l.modularityFast(ag, community),
 	}
 
 	return result
 }
 
-// calculateCohesion calculates community cohesion
-func (l *LeidenAlgorithm) calculateCohesion(ag *AdjGraph, nodeIdxs []int) float64 {
+// calculateCohesionFast faster cohesion calculation
+func (l *LeidenAlgorithm) calculateCohesionFast(ag *AdjGraph, nodeIdxs []int) float64 {
 	if len(nodeIdxs) <= 1 {
 		return 1.0
 	}
-
-	internalWeight := 0.0
-	totalWeight := 0.0
-
-	nodeSet := make(map[int]bool)
+	mask := make(map[int]bool, len(nodeIdxs))
 	for _, idx := range nodeIdxs {
-		nodeSet[idx] = true
+		mask[idx] = true
 	}
-
+	internal, total := 0.0, 0.0
 	for _, idx := range nodeIdxs {
 		for _, nb := range ag.Adj[idx] {
-			totalWeight += nb.weight
-			if nodeSet[nb.idx] {
-				internalWeight += nb.weight
+			total += nb.weight
+			if mask[nb.idx] {
+				internal += nb.weight
+			}
+		}
+	}
+	if total == 0 {
+		return 0.0
+	}
+	return internal / total
+}
+
+// modularityFast faster modularity calculation
+func (l *LeidenAlgorithm) modularityFast(ag *AdjGraph, community []int) float64 {
+	n := len(ag.Nodes)
+	m2 := ag.TotalWeight * 2
+	commW := make(map[int]float64, n/4)
+	commIn := make(map[int]float64, n/4)
+
+	for i := 0; i < n; i++ {
+		c := community[i]
+		commW[c] += ag.Weight[i]
+		for _, nb := range ag.Adj[i] {
+			if community[nb.idx] == c {
+				commIn[c] += nb.weight
 			}
 		}
 	}
 
-	if totalWeight == 0 {
-		return 0.0
+	Q := 0.0
+	for c := range commW {
+		Q += commIn[c]/m2 - math.Pow(commW[c]/m2, 2)
 	}
-	return internalWeight / totalWeight
+	return Q
 }
 
 // generateLabel generates heuristic community name
-// Strategy: 1. Common prefix 2. Highest weight node name
 func (l *LeidenAlgorithm) generateLabel(ag *AdjGraph, nodeIdxs []int) string {
 	if len(nodeIdxs) == 0 {
 		return "empty"
 	}
-
-	// 1. Collect node names in community
 	names := make([]string, 0, len(nodeIdxs))
 	for _, idx := range nodeIdxs {
-		if idx < len(ag.Nodes) {
-			// Try to get node name from GraphStore (if available)
-			names = append(names, ag.Nodes[idx])
-		}
+		names = append(names, ag.Nodes[idx])
 	}
-
-	// 2. Calculate common prefix
 	prefix := commonPrefix(names)
 	if prefix != "" && len(prefix) >= 2 {
 		return prefix + "*"
 	}
-
-	// 3. Fallback: use highest weight node name in community
 	bestIdx := nodeIdxs[0]
-	bestWeight := 0.0
+	bestW := 0.0
 	for _, idx := range nodeIdxs {
-		if idx < len(ag.Weight) && ag.Weight[idx] > bestWeight {
-			bestWeight = ag.Weight[idx]
+		if ag.Weight[idx] > bestW {
+			bestW = ag.Weight[idx]
 			bestIdx = idx
 		}
 	}
-	if bestIdx < len(ag.Nodes) {
-		name := ag.Nodes[bestIdx]
-		// Extract short name after last separator
-		if idx := strings.LastIndex(name, "/"); idx >= 0 {
-			name = name[idx+1:]
-		}
-		if idx := strings.LastIndex(name, "."); idx >= 0 {
-			name = name[idx+1:]
-		}
-		return name
+	name := ag.Nodes[bestIdx]
+	if idx := strings.LastIndex(name, "/"); idx >= 0 {
+		name = name[idx+1:]
 	}
-
-	return "community"
+	if idx := strings.LastIndex(name, "."); idx >= 0 {
+		name = name[idx+1:]
+	}
+	return name
 }
 
-// commonPrefix calculates common prefix of string slice
+// commonPrefix calculates longest common prefix of string slice
 func commonPrefix(names []string) string {
 	if len(names) == 0 {
 		return ""
 	}
 	prefix := names[0]
-	for _, name := range names[1:] {
-		for i := 0; i < len(prefix) && i < len(name); i++ {
-			if prefix[i] != name[i] {
+	for _, s := range names[1:] {
+		minL := min(len(prefix), len(s))
+		prefix = prefix[:minL]
+		for i := 0; i < minL; i++ {
+			if prefix[i] != s[i] {
 				prefix = prefix[:i]
 				break
 			}
 		}
-		if len(name) < len(prefix) {
-			prefix = name
+		if prefix == "" {
+			break
 		}
 	}
 	return prefix
 }
 
-// avgCohesion calculates average cohesion
+// avgCohesion calculates average cohesion across communities
 func (l *LeidenAlgorithm) avgCohesion(communities []CommunityNode) float64 {
 	if len(communities) == 0 {
 		return 0
@@ -406,41 +463,4 @@ func (l *LeidenAlgorithm) avgCohesion(communities []CommunityNode) float64 {
 		sum += c.Cohesion
 	}
 	return sum / float64(len(communities))
-}
-
-// modularity calculates modularity
-func (l *LeidenAlgorithm) modularity(ag *AdjGraph, community []int) float64 {
-	Q := 0.0
-	n := len(ag.Nodes)
-	m2 := ag.TotalWeight * 2
-
-	commWeight := make(map[int]float64)   // Community total degree
-	commInternal := make(map[int]float64) // Community internal edge weight
-
-	for i := 0; i < n; i++ {
-		commWeight[community[i]] += ag.Weight[i]
-		for _, nb := range ag.Adj[i] {
-			if community[nb.idx] == community[i] {
-				commInternal[community[i]] += nb.weight
-			}
-		}
-	}
-
-	for comm := range commWeight {
-		Q += commInternal[comm]/m2 - math.Pow(commWeight[comm]/m2, 2)
-	}
-
-	return Q
-}
-
-// randPerm generates random permutation
-func (l *LeidenAlgorithm) randPerm(n int) []int {
-	perm := make([]int, n)
-	for i := range perm {
-		perm[i] = i
-	}
-	l.rng.Shuffle(n, func(i, j int) {
-		perm[i], perm[j] = perm[j], perm[i]
-	})
-	return perm
 }

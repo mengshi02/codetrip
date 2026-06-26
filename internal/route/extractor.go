@@ -6,7 +6,7 @@ import (
 	"sync"
 
 	"github.com/mengshi02/codetrip/internal/graph"
-	"github.com/mengshi02/codetrip/internal/pipeline"
+	"github.com/mengshi02/codetrip/internal/collection"
 )
 
 // RouteExtractor route extractor interface
@@ -14,7 +14,7 @@ type RouteExtractor interface {
 	// Framework returns the framework name
 	Framework() string
 	// Extract extracts route information from parsed files
-	Extract(ctx context.Context, g *graph.GraphStore, files []*pipeline.ParsedFile) ([]*Route, error)
+	Extract(ctx context.Context, g *graph.GraphStore, files []*collection.ParsedFile) ([]*Route, error)
 }
 
 // Route route information
@@ -57,7 +57,7 @@ func (r *RouteRegistry) Register(extractor RouteExtractor) {
 }
 
 // ExtractAll executes all registered extractors and aggregates routes
-func (r *RouteRegistry) ExtractAll(ctx context.Context, g *graph.GraphStore, files []*pipeline.ParsedFile) ([]*Route, error) {
+func (r *RouteRegistry) ExtractAll(ctx context.Context, g *graph.GraphStore, files []*collection.ParsedFile) ([]*Route, error) {
 	r.mu.Lock()
 	extractors := make([]RouteExtractor, len(r.extractors))
 	copy(extractors, r.extractors)
@@ -110,14 +110,14 @@ func NewRoutePhase(registry *RouteRegistry) *RoutePhase {
 	return &RoutePhase{registry: registry}
 }
 
-// Name 实现 pipeline.Phase
+// Name 实现 collection.Phase
 func (p *RoutePhase) Name() string { return "route" }
 
-// Dependencies 实现 pipeline.Phase
+// Dependencies 实现 collection.Phase
 func (p *RoutePhase) Dependencies() []string { return []string{"parse"} }
 
-// Run 实现 pipeline.Phase
-func (p *RoutePhase) Run(ctx context.Context, input *pipeline.PhaseInput) (*pipeline.PhaseOutput, error) {
+// Run 实现 collection.Phase
+func (p *RoutePhase) Run(ctx context.Context, input *collection.PhaseInput) (*collection.PhaseOutput, error) {
 	routes, err := p.registry.ExtractAll(ctx, input.Graph, input.Files)
 	if err != nil {
 		return nil, err
@@ -128,7 +128,7 @@ func (p *RoutePhase) Run(ctx context.Context, input *pipeline.PhaseInput) (*pipe
 		return nil, err
 	}
 
-	return &pipeline.PhaseOutput{
+	return &collection.PhaseOutput{
 		NodesAdded: nodesAdded,
 		EdgesAdded: edgesAdded,
 	}, nil

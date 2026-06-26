@@ -73,7 +73,20 @@ const (
 	LabelUnknown  Label = "Unknown"
 )
 
-// IsSymbol determines whether a label is a code symbol (node types that need parsing)
+// IsActionableSymbol returns true for symbol labels that are meaningful for
+// impact analysis and change detection. This excludes low-value noise symbols
+// (Variable, Const, Property, Static, CodeElement, Annotation, Decorator)
+// that clutter results without providing actionable insight.
+func (l Label) IsActionableSymbol() bool {
+	switch l {
+	case LabelFunction, LabelClass, LabelInterface, LabelMethod, LabelConstructor,
+		LabelStruct, LabelEnum, LabelMacro, LabelTypedef, LabelUnion, LabelTypeAlias, LabelType,
+		LabelNamespace, LabelTrait, LabelImpl, LabelModule, LabelTemplate,
+		LabelRecord, LabelDelegate, LabelRoute, LabelImport:
+		return true
+	}
+	return false
+}
 func (l Label) IsSymbol() bool {
 	switch l {
 	case LabelFunction, LabelClass, LabelInterface, LabelMethod, LabelConstructor,

@@ -19,7 +19,6 @@ type Metrics struct {
 	SearchQueries    atomic.Int64 // search queries
 	ContextQueries   atomic.Int64 // context queries
 	RenameQueries    atomic.Int64 // rename queries
-	CypherQueries    atomic.Int64 // cypher queries
 
 	// Graph operations
 	NodeReads  atomic.Int64 // total node read operations
@@ -48,7 +47,6 @@ type MetricsSnapshot struct {
 	SearchQueries    int64
 	ContextQueries   int64
 	RenameQueries    int64
-	CypherQueries    int64
 	NodeReads        int64
 	EdgeReads        int64
 	NodeWrites       int64
@@ -72,7 +70,6 @@ func (trip *Trip) GetMetrics() MetricsSnapshot {
 		SearchQueries:    trip.metrics.SearchQueries.Load(),
 		ContextQueries:   trip.metrics.ContextQueries.Load(),
 		RenameQueries:    trip.metrics.RenameQueries.Load(),
-		CypherQueries:    trip.metrics.CypherQueries.Load(),
 		NodeReads:        trip.metrics.NodeReads.Load(),
 		EdgeReads:        trip.metrics.EdgeReads.Load(),
 		NodeWrites:       trip.metrics.NodeWrites.Load(),
