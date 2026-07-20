@@ -1,10 +1,10 @@
 # Codetrip User Guide
 
-Codetrip is a hybrid-graph code intelligence engine with three supported integration surfaces: Go library, CLI, and MCP. All three use the same persisted repository snapshots and public `Trip` operations.
+Codetrip is a Hybrid Graph-Augmented Code Intelligence Engine with three supported integration surfaces: Go library, CLI, and MCP. All three use the same persisted repository snapshots and public `Engine` operations.
 
 ## Data and update model
 
-The default data directory is `~/.codetrip`; override it with the global `--trip-dir` flag.
+The default data directory is `~/.codetrip`; override it with the global `--dir` flag.
 
 ```text
 db/       authoritative graph, adjacency, metadata, and active pointers
@@ -46,8 +46,8 @@ Index flags:
 |---|---|
 | `--repo` | Logical repository name; defaults to the source directory name |
 | `--replace` | Atomically publish a complete replacement snapshot |
-| `--export` | Write parser-validation CSV files to a directory |
-| `--export-strict` | Fail indexing if validation CSV generation fails |
+| `--export` | Write deterministic parser-inspection CSV files to a directory |
+| `--export-strict` | Fail indexing if parser CSV generation fails |
 
 ### Search
 
@@ -96,7 +96,7 @@ Validation CSV captures the ingest result before persistence and is intended for
 
 ```bash
 codetrip index /src/project --repo project \
-  --export ./validation-output/project --export-strict
+  --export ./local-review/project --export-strict
 ```
 
 Full export reflects the active persisted graph:
@@ -130,7 +130,7 @@ result, err := engine.IndexRepo(ctx, "/src/project",
     codetrip.WithRepoName("project"),
     codetrip.WithReplaceExisting(true),
     codetrip.WithIndexTimeout(30*time.Minute),
-    codetrip.WithCSVExport("./validation-output/project"),
+    codetrip.WithCSVExport("./local-review/project"),
     codetrip.WithCSVExportStrict(true),
 )
 
@@ -188,17 +188,20 @@ The Go API exposes domain request/result types. Internal storage and index imple
 ## MCP
 
 ```bash
-codetrip mcp --trip-dir ~/.codetrip
+codetrip mcp --dir ~/.codetrip
 ```
 
-The stdio server exposes `list_repositories`, `search_symbols`, `search_source`, `traverse_graph`, and `shortest_path`. MCP lives in the CLI adapter and invokes only public library methods.
+The stdio server exposes `list`, `search`, `source`, `traverse`, and `path`, matching the corresponding CLI command names. MCP lives in the CLI adapter and invokes only public library methods.
 
-## Validation
+## Local language tuning
 
-Codetrip uses one production analysis path. Independent expectations and fixtures live under `validation/`.
+Codetrip uses one production analysis path. Maintainers can inspect the
+deterministic CSV produced by `--export` using their local fixtures, gold
+expectations, and review tools. Those tuning assets are intentionally not part
+of the public source repository and are not required by CLI, MCP, or Go library
+users.
 
 ```bash
-go build -o ./codetrip ./cmd/codetrip
-python3 validation/tools/check_quality.py
-python3 -m unittest discover -s validation/tools -p 'test_*.py'
+codetrip index /src/project --repo project \
+  --export /path/to/local-review/project --export-strict
 ```

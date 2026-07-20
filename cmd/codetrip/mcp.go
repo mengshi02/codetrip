@@ -8,9 +8,9 @@ import (
 	"github.com/spf13/cobra"
 )
 
-type listRepositoriesInput struct{}
+type listInput struct{}
 
-type listRepositoriesOutput struct {
+type listOutput struct {
 	Repositories []codetrip.RepoInfo `json:"repositories"`
 }
 
@@ -32,15 +32,15 @@ func newMCPServer(e *codetrip.Engine) *protocol.Server {
 	server := protocol.NewServer(&protocol.Implementation{Name: "codetrip", Version: codetrip.Version}, nil)
 
 	protocol.AddTool(server, &protocol.Tool{
-		Name:        "list_repositories",
+		Name:        "list",
 		Description: "List repositories indexed in the codetrip data directory.",
-	}, func(_ context.Context, _ *protocol.CallToolRequest, _ listRepositoriesInput) (*protocol.CallToolResult, listRepositoriesOutput, error) {
+	}, func(_ context.Context, _ *protocol.CallToolRequest, _ listInput) (*protocol.CallToolResult, listOutput, error) {
 		repositories, err := e.ListRepos()
-		return nil, listRepositoriesOutput{Repositories: repositories}, err
+		return nil, listOutput{Repositories: repositories}, err
 	})
 
 	protocol.AddTool(server, &protocol.Tool{
-		Name:        "search_symbols",
+		Name:        "search",
 		Description: "Search indexed code symbols by name and metadata.",
 	}, func(ctx context.Context, _ *protocol.CallToolRequest, input codetrip.SearchRequest) (*protocol.CallToolResult, codetrip.SearchResult, error) {
 		result, err := e.Search(ctx, &input)
@@ -51,7 +51,7 @@ func newMCPServer(e *codetrip.Engine) *protocol.Server {
 	})
 
 	protocol.AddTool(server, &protocol.Tool{
-		Name:        "search_source",
+		Name:        "source",
 		Description: "Search file names and source contents using literal, regular-expression, file, and language filters.",
 	}, func(ctx context.Context, _ *protocol.CallToolRequest, input codetrip.SourceSearchRequest) (*protocol.CallToolResult, codetrip.SourceSearchResult, error) {
 		result, err := e.SearchSource(ctx, &input)
@@ -62,7 +62,7 @@ func newMCPServer(e *codetrip.Engine) *protocol.Server {
 	})
 
 	protocol.AddTool(server, &protocol.Tool{
-		Name:        "traverse_graph",
+		Name:        "traverse",
 		Description: "Run a bounded breadth-first traversal from a code graph node.",
 	}, func(ctx context.Context, _ *protocol.CallToolRequest, input codetrip.TraverseRequest) (*protocol.CallToolResult, codetrip.TraverseResult, error) {
 		result, err := e.Traverse(ctx, &input)
@@ -73,7 +73,7 @@ func newMCPServer(e *codetrip.Engine) *protocol.Server {
 	})
 
 	protocol.AddTool(server, &protocol.Tool{
-		Name:        "shortest_path",
+		Name:        "path",
 		Description: "Find the shortest directed path between two code graph nodes.",
 	}, func(ctx context.Context, _ *protocol.CallToolRequest, input codetrip.PathRequest) (*protocol.CallToolResult, codetrip.PathResult, error) {
 		result, err := e.ShortestPath(ctx, &input)

@@ -1,93 +1,66 @@
-# codetrip
+# codetrip [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT) [![Go Version](https://img.shields.io/badge/Go-1.26+-00ADD8?logo=go&logoColor=white)](https://go.dev/) [![Version](https://img.shields.io/badge/version-0.2.0-blue.svg)](https://github.com/mengshi02/codetrip) [![Build](https://github.com/mengshi02/codetrip/actions/workflows/go.yml/badge.svg)](https://github.com/mengshi02/codetrip/actions/workflows/go.yml)
 
-Codetrip is an embeddable hybrid-graph code intelligence engine. It turns a source repository into a typed code graph and exposes the result through a Go library, a CLI, and an MCP server.
+**Hybrid Graph-Augmented Code Intelligence Engine**
 
-The production pipeline has one analysis path. Language accuracy is tuned with the fixtures and gold expectations under `validation/`; optional CSV output makes parser results inspectable without changing runtime behavior.
+Codetrip turns a source repository into a typed code graph and combines graph traversal, lexical source search, and semantic retrieval. Use it as a Go library, a CLI, or an MCP server.
 
-## Capabilities
-
-- Multi-language parsing with tree-sitter and language-aware symbol resolution.
-- Typed nodes and relationships for files, symbols, calls, imports, inheritance, overrides, communities, and execution processes.
-- Repository-isolated persistence, adjacency indexes, caches, BFS, and shortest path traversal.
-- Symbol search, source substring/regular-expression search, semantic retrieval, and hybrid rank fusion.
-- Atomic full-snapshot replacement: a new graph and all derived indexes are built before publication.
-- Deterministic validation CSV and complete persisted-graph CSV export.
-- CLI, MCP, and Go library integration surfaces.
-
-Supported parsers include Go, TypeScript/TSX, JavaScript/JSX, Python, Java, C, C++, C#, Rust, Ruby, PHP, Swift, and Kotlin.
-
-## Architecture
+## How It Works
 
 ```text
-source repository
-       |
-       v
-validated ingest pipeline
-       |
-       v
-typed in-memory graph
-       |
-       +----> durable graph + adjacency + cache
-       +----> symbol index
-       +----> source index
-       +----> optional semantic index
-       |
-       v
-atomic active-snapshot publication
-       |
-       +----> Go API
-       +----> CLI
-       +----> MCP
++--------------------+     +------------------------------+     +------------------------+
+| Source Code        |     | Codetrip Engine              |     | Intelligence           |
+|                    |     |                              |     |                        |
+| .go  .ts  .py      | --> | Parse + Language Resolution  | --> | Symbol Search          |
+| .rs  .java  ...    |     |             |                |     | Source Search          |
+|                    |     |             v                |     | Graph Context          |
+| Repository         |     |      Typed Code Graph        |     | Dependency Exploration |
+|                    |     |             |                |     | Bounded BFS            |
+|                    |     |   +---------+---------+      |     | Shortest Path          |
+|                    |     |   |         |         |      |     | Hybrid Retrieval       |
+|                    |     | Symbol    Source   Semantic  |     | Agent Context          |
+|                    |     | Index     Index    Vectors   |     |                        |
+|                    |     |   +---------+---------+      |     |                        |
+|                    |     |             |                |     |                        |
+|                    |     |     Atomic Snapshot          |     |                        |
+|                    |     |             |                |     |                        |
+|                    |     |      Go LIB / CLI / MCP      |     |                        |
++--------------------+     +------------------------------+     +------------------------+
 ```
 
-The durable graph is authoritative. Search structures are repository-scoped derived data and use the same physical snapshot identity. CSV is an offline validation, inspection, and interchange artifact.
+Each repository is published as an atomic snapshot. The durable graph is authoritative; search indexes and vectors are repository-scoped derived data.
 
-## Install
+## Quick Start
+
+### Install
 
 ```bash
 go install github.com/mengshi02/codetrip/cmd/codetrip@latest
 ```
 
-Or build locally:
+Or build from source:
 
 ```bash
-make build
+git clone https://github.com/mengshi02/codetrip.git
+cd codetrip && make build
 ```
 
-Codetrip uses CGO for tree-sitter. Release binaries are built on native Linux,
-macOS, and Windows runners and require no third-party runtime installation.
-`make build-all` dispatches that GitHub Actions matrix; use `gh run watch` and
-`gh run download` to follow it and retrieve the archives.
-
-Source search uses the native high-throughput backend on Linux and macOS. The
-Windows build uses a portable full-text backend with exact line verification;
-it preserves literal/regular-expression search, file and language filters, and
-context lines, but is slower on large repositories. Source indexes must be
-rebuilt when moving a data directory between these platform families.
-
-## CLI quick start
+### Index and Search
 
 ```bash
-# Build a repository snapshot.
 codetrip index /path/to/project --repo project
 
-# Replace an existing repository with a complete new snapshot.
-codetrip index /path/to/project --repo project --replace
-
-# Search symbols and source text.
 codetrip search "ParseConfig" --repo project
 codetrip source 'lang:go ParseConfig' --repo project
-
-# Traverse the graph.
-codetrip traverse NODE_ID --repo project --direction both --depth 3
-codetrip path SOURCE_ID TARGET_ID --repo project
-
-# Inspect persisted data.
-codetrip list
-codetrip export --repo project --output ./exports/project
 ```
 
-Semantic and hybrid retrieval use an OpenAI-compatible embedding endpoint:
+### Explore the Graph
+
+```bash
+codetrip traverse NODE_ID --repo project --direction both --depth 3
+codetrip path SOURCE_ID TARGET_ID --repo project
+```
+
+### Semantic Search
 
 ```bash
 codetrip embed --repo project \
@@ -99,88 +72,77 @@ codetrip hybrid "configuration loading" --repo project \
   --model nomic-embed-text
 ```
 
-Run `codetrip <command> --help` for the complete flag set.
+## Core Capabilities
 
-## Go library
+| Capability | Description |
+|---|---|
+| **Code Graph** | Typed files, symbols, calls, imports, inheritance, overrides, communities, and processes |
+| **Multi-language Parsing** | Go, TypeScript/TSX, JavaScript/JSX, Python, Java, C, C++, C#, Rust, Ruby, PHP, Swift, and Kotlin |
+| **Graph Navigation** | Bounded BFS and shortest directed paths over typed relationships |
+| **Symbol Search** | Repository-scoped lexical search over symbols and metadata |
+| **Source Search** | File-name and source-content search with literal, regex, file, and language filters |
+| **Semantic Retrieval** | HTTP embeddings, persisted vectors, optional int8 quantization, and hybrid rank fusion |
+| **Atomic Snapshots** | Complete replacement builds before publication; active data is never partially updated |
+| **CSV Export** | Deterministic parser-inspection CSV and complete persisted-graph export |
+
+## Go Library
 
 ```go
-package main
+engine, err := codetrip.Open("./.codetrip")
+if err != nil {
+    log.Fatal(err)
+}
+defer engine.Close()
 
-import (
-    "context"
-    "log"
-
-    "github.com/mengshi02/codetrip"
+_, err = engine.IndexRepo(ctx, "/path/to/project",
+    codetrip.WithRepoName("project"),
+    codetrip.WithReplaceExisting(true),
 )
 
-func main() {
-    engine, err := codetrip.Open("./.codetrip")
-    if err != nil {
-        log.Fatal(err)
-    }
-    defer engine.Close()
-
-    ctx := context.Background()
-    _, err = engine.IndexRepo(ctx, "/path/to/project",
-        codetrip.WithRepoName("project"),
-        codetrip.WithReplaceExisting(true),
-    )
-    if err != nil {
-        log.Fatal(err)
-    }
-
-    symbols, err := engine.Search(ctx, &codetrip.SearchRequest{
-        Repo: "project", Query: "ParseConfig", Limit: 20,
-    })
-    if err != nil {
-        log.Fatal(err)
-    }
-    _ = symbols
-}
+result, err := engine.Search(ctx, &codetrip.SearchRequest{
+    Repo: "project", Query: "ParseConfig", Limit: 20,
+})
 ```
 
-The public library also provides source search, embedding, hybrid search, traversal, shortest path, repository listing, CSV export, metrics, and configuration options. Internal storage and indexing types are not part of the public contract.
+The public API also provides source search, embedding, hybrid search, traversal, shortest paths, repository listing, CSV export, metrics, and configuration options.
 
 ## MCP
 
 ```bash
-codetrip mcp --trip-dir ~/.codetrip
+codetrip mcp --dir ~/.codetrip
 ```
 
-The stdio server exposes:
+The stdio server exposes the same core names as the CLI:
 
-- `list_repositories`
-- `search_symbols`
-- `search_source`
-- `traverse_graph`
-- `shortest_path`
+```text
+list  search  source  traverse  path
+```
 
-MCP is implemented in the CLI adapter and calls only the public Go library API.
-
-## Validation
-
-Export parser-validation CSV while indexing:
+## CSV Inspection
 
 ```bash
 codetrip index /path/to/project --repo project \
-  --export ./validation-output/project \
-  --export-strict
+  --export ./local-review/project --export-strict
+
+codetrip export --repo project --output ./exports/project
 ```
 
-Run the independent fixture gate:
+Language fixtures and review tools are maintainer-local assets; users only need the CSV export capability.
 
-```bash
-python3 validation/tools/check_quality.py
-```
+## Platforms
 
-See [English user guide](docs/USER_GUIDE.md), [中文用户手册](docs/USER_GUIDE_ZH.md), and [quality standard](validation/QUALITY_STANDARD.md).
+Release binaries are available for Linux and macOS on amd64/arm64, and Windows on amd64. They are distributed as single executables with no third-party runtime installation. Windows uses a portable source-search backend and may be slower on large repositories.
+
+## Documentation
+
+- [English user guide](docs/USER_GUIDE.md)
+- [中文用户手册](docs/USER_GUIDE_ZH.md)
 
 ## Development
 
 ```bash
 go test ./...
 go vet ./...
-make release-build
 ```
 
 ## License

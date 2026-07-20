@@ -42,7 +42,7 @@ func newRootCmd(flags *cliFlags) *cobra.Command {
 		Use:   "codetrip",
 		Short: "Production code graph ingestion and retrieval engine",
 	}
-	root.PersistentFlags().StringVar(&flags.tripDir, "trip-dir", "", "data directory (default: ~/.codetrip)")
+	root.PersistentFlags().StringVar(&flags.tripDir, "dir", "", "data directory (default: ~/.codetrip)")
 	root.PersistentFlags().BoolVarP(&flags.verbose, "verbose", "v", false, "enable info logging")
 	root.AddCommand(newIndexCmd(flags), newSearchCmd(flags), newSourceCmd(flags), newEmbedCmd(flags), newHybridCmd(flags), newTraverseCmd(flags), newPathCmd(flags), newExportCmd(flags), newListCmd(flags), newMCPCmd(flags), newVersionCmd())
 	return root

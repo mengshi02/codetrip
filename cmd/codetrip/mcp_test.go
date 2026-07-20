@@ -39,14 +39,19 @@ func TestMCPServerTools(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := map[string]bool{
-		"list_repositories": false,
-		"search_symbols":    false,
-		"search_source":     false,
-		"traverse_graph":    false,
-		"shortest_path":     false,
+		"list":     false,
+		"search":   false,
+		"source":   false,
+		"traverse": false,
+		"path":     false,
+	}
+	if len(listed.Tools) != len(want) {
+		t.Fatalf("advertised %d tools, want exactly %d", len(listed.Tools), len(want))
 	}
 	for _, tool := range listed.Tools {
-		if _, ok := want[tool.Name]; ok {
+		if _, ok := want[tool.Name]; !ok {
+			t.Errorf("unexpected tool %q was advertised", tool.Name)
+		} else {
 			want[tool.Name] = true
 		}
 	}
@@ -56,11 +61,11 @@ func TestMCPServerTools(t *testing.T) {
 		}
 	}
 
-	result, err := clientSession.CallTool(ctx, &protocol.CallToolParams{Name: "list_repositories", Arguments: map[string]any{}})
+	result, err := clientSession.CallTool(ctx, &protocol.CallToolParams{Name: "list", Arguments: map[string]any{}})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if result.IsError {
-		t.Fatalf("list_repositories returned tool error: %v", result.Content)
+		t.Fatalf("list returned tool error: %v", result.Content)
 	}
 }
