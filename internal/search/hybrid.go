@@ -2,13 +2,15 @@ package search
 
 import (
 	"context"
+	"github.com/mengshi02/codetrip/internal/search/semantic"
+	"github.com/mengshi02/codetrip/internal/search/symbol"
 	"sort"
 )
 
-// HybridSearch combines BM25 + semantic search + RRF fusion
+// HybridSearch combines lexical + semantic search + RRF fusion
 type HybridSearch struct {
-	bm25   *BM25Index
-	vector *VectorSearch
+	lexical *symbol.LexicalIndex
+	vector  *semantic.VectorSearch
 }
 
 // symbolTypePriority returns a priority value for a symbol label.
@@ -32,10 +34,10 @@ func symbolTypePriority(label string) int {
 }
 
 // NewHybridSearch creates a hybrid search engine
-func NewHybridSearch(bm25 *BM25Index, vector *VectorSearch) *HybridSearch {
+func NewHybridSearch(lexical *symbol.LexicalIndex, vector *semantic.VectorSearch) *HybridSearch {
 	return &HybridSearch{
-		bm25:   bm25,
-		vector: vector,
+		lexical: lexical,
+		vector:  vector,
 	}
 }
 
@@ -49,13 +51,13 @@ type HybridSearchItem struct {
 	FilePath      string
 	Score         float64 // RRF score
 	Rank          int
-	Sources       []string // "bm25" | "semantic"
+	Sources       []string // "lexical" | "semantic"
 	NodeID        string
 	Name          string
 	Label         string
 	StartLine     int
 	EndLine       int
-	BM25Score     float64
+	LexicalScore  float64
 	SemanticScore float64
 }
 
@@ -64,19 +66,19 @@ type HybridSearchItem struct {
 func (h *HybridSearch) Search(query string, limit int) (*HybridResult, error) {
 	const K = 60.0
 
-	// Execute BM25 and semantic search in parallel
+	// Execute lexical and semantic search in parallel
 	type bm25Result struct {
-		results []BM25Result
+		results []symbol.LexicalResult
 		err     error
 	}
 	bm25Ch := make(chan bm25Result, 1)
 	go func() {
-		results, err := h.bm25.Search(query, limit)
+		results, err := h.lexical.Search(query, limit)
 		bm25Ch <- bm25Result{results, err}
 	}()
 
 	// Semantic search (if available)
-	var semanticResults []SemanticResult
+	var semanticResults []semantic.SemanticResult
 	if h.vector != nil {
 		ctx := context.Background()
 		results, err := h.vector.Search(ctx, query, limit)
@@ -97,19 +99,19 @@ func (h *HybridSearch) Search(query string, limit int) (*HybridResult, error) {
 		rrfScore := 1.0 / (K + float64(rank+1))
 		if item, ok := scores[r.NodeID]; ok {
 			item.Score += rrfScore
-			item.Sources = append(item.Sources, "bm25")
-			item.BM25Score = r.Score
+			item.Sources = append(item.Sources, "lexical")
+			item.LexicalScore = r.Score
 		} else {
 			scores[r.NodeID] = &HybridSearchItem{
-				NodeID:    r.NodeID,
-				FilePath:  r.FilePath,
-				Name:      r.Name,
-				Label:     r.Label,
-				Score:     rrfScore,
-				Sources:   []string{"bm25"},
-				BM25Score: r.Score,
-				StartLine: r.StartLine,
-				EndLine:   r.EndLine,
+				NodeID:       r.NodeID,
+				FilePath:     r.FilePath,
+				Name:         r.Name,
+				Label:        r.Label,
+				Score:        rrfScore,
+				Sources:      []string{"lexical"},
+				LexicalScore: r.Score,
+				StartLine:    r.StartLine,
+				EndLine:      r.EndLine,
 			}
 		}
 	}
@@ -162,25 +164,25 @@ func (h *HybridSearch) Search(query string, limit int) (*HybridResult, error) {
 	return &HybridResult{Results: items}, nil
 }
 
-// SearchDualModal executes hybrid search using dual-modal vector search + BM25.
+// SearchDualModal executes hybrid search using dual-modal vector search + lexical.
 // Uses VectorSearch.SearchDualModal for parallel desc/code HNSW search with RRF,
-// then fuses with BM25 results using another RRF pass.
+// then fuses with lexical results using another RRF pass.
 func (h *HybridSearch) SearchDualModal(ctx context.Context, query string, limit int) (*HybridResult, error) {
 	const K = 60.0
 
-	// Execute BM25 and dual-modal semantic search in parallel
+	// Execute lexical and dual-modal semantic search in parallel
 	type bm25Result struct {
-		results []BM25Result
+		results []symbol.LexicalResult
 		err     error
 	}
 	bm25Ch := make(chan bm25Result, 1)
 	go func() {
-		results, err := h.bm25.Search(query, limit)
+		results, err := h.lexical.Search(query, limit)
 		bm25Ch <- bm25Result{results, err}
 	}()
 
 	// Dual-modal semantic search (if available)
-	var semanticResults []SemanticResult
+	var semanticResults []semantic.SemanticResult
 	if h.vector != nil {
 		results, err := h.vector.SearchDualModal(ctx, query, limit)
 		if err == nil {
@@ -200,19 +202,19 @@ func (h *HybridSearch) SearchDualModal(ctx context.Context, query string, limit 
 		rrfScore := 1.0 / (K + float64(rank+1))
 		if item, ok := scores[r.NodeID]; ok {
 			item.Score += rrfScore
-			item.Sources = append(item.Sources, "bm25")
-			item.BM25Score = r.Score
+			item.Sources = append(item.Sources, "lexical")
+			item.LexicalScore = r.Score
 		} else {
 			scores[r.NodeID] = &HybridSearchItem{
-				NodeID:    r.NodeID,
-				FilePath:  r.FilePath,
-				Name:      r.Name,
-				Label:     r.Label,
-				Score:     rrfScore,
-				Sources:   []string{"bm25"},
-				BM25Score: r.Score,
-				StartLine: r.StartLine,
-				EndLine:   r.EndLine,
+				NodeID:       r.NodeID,
+				FilePath:     r.FilePath,
+				Name:         r.Name,
+				Label:        r.Label,
+				Score:        rrfScore,
+				Sources:      []string{"lexical"},
+				LexicalScore: r.Score,
+				StartLine:    r.StartLine,
+				EndLine:      r.EndLine,
 			}
 		}
 	}

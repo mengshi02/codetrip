@@ -34,14 +34,19 @@ func nodePrefix(repo string) []byte {
 
 // --- Edge keys ---
 
-// edgeKey builds "e:{id}"
-func edgeKey(id string) string {
+// edgeKey builds "e:{repo}:{id}".
+func edgeKey(repo, id string) string {
 	var b strings.Builder
-	b.Grow(1 + len(id))
-	b.WriteByte('e')
+	b.Grow(2 + len(repo) + 1 + len(id))
+	b.WriteString("e:")
+	b.WriteString(repo)
 	b.WriteByte(':')
 	b.WriteString(id)
 	return b.String()
+}
+
+func edgePrefix(repo string) []byte {
+	return []byte("e:" + repo + ":")
 }
 
 // --- Index keys ---
@@ -168,20 +173,6 @@ func adjKey(repo, nodeID, dir, relType string) string {
 	return b.String()
 }
 
-// adjPrefix builds "adj:{repo}:{nodeID}:{dir}:"
-func adjPrefix(repo, nodeID, dir string) []byte {
-	var b strings.Builder
-	b.Grow(4 + len(repo) + 1 + len(nodeID) + 1 + len(dir) + 1)
-	b.WriteString("adj:")
-	b.WriteString(repo)
-	b.WriteByte(':')
-	b.WriteString(nodeID)
-	b.WriteByte(':')
-	b.WriteString(dir)
-	b.WriteByte(':')
-	return []byte(b.String())
-}
-
 // adjScanPrefix builds "adj:{repo}:{nodeID}:{dir}:" as string (for ScanPrefix with string key parsing)
 func adjScanPrefix(repo, nodeID, dir string) string {
 	var b strings.Builder
@@ -207,27 +198,6 @@ func AdjRepoPrefix(repo string) []byte {
 }
 
 // --- Embedding keys ---
-
-// EmbHashKey builds "embhash:{repo}:{nodeID}" — content hash for embedding incremental check
-func EmbHashKey(repo, nodeID string) string {
-	var b strings.Builder
-	b.Grow(8 + len(repo) + 1 + len(nodeID))
-	b.WriteString("embhash:")
-	b.WriteString(repo)
-	b.WriteByte(':')
-	b.WriteString(nodeID)
-	return b.String()
-}
-
-// EmbHashRepoPrefix builds "embhash:{repo}:" — scans all embedding hash keys for a repo
-func EmbHashRepoPrefix(repo string) []byte {
-	var b strings.Builder
-	b.Grow(8 + len(repo) + 1)
-	b.WriteString("embhash:")
-	b.WriteString(repo)
-	b.WriteByte(':')
-	return []byte(b.String())
-}
 
 // --- Dual-Modal Embedding keys ---
 

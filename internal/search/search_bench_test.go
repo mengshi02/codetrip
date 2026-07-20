@@ -5,9 +5,10 @@ import (
 	"testing"
 
 	"github.com/mengshi02/codetrip/internal/graph"
+	"github.com/mengshi02/codetrip/internal/search/symbol"
 )
 
-func BenchmarkBM25IndexNode(b *testing.B) {
+func BenchmarkLexicalIndexNode(b *testing.B) {
 	idx, cleanup := openTestBM25B(b)
 	defer cleanup()
 
@@ -52,26 +53,7 @@ func BenchmarkBM25Search(b *testing.B) {
 	}
 }
 
-func BenchmarkTokenize(b *testing.B) {
-	for i := 0; i < b.N; i++ {
-		tokenize("getUserByIDHTTPRequest")
-	}
-}
-
-func BenchmarkCosineSimilarity(b *testing.B) {
-	a := make([]float32, 384)
-	v := make([]float32, 384)
-	for i := range a {
-		a[i] = float32(i) / 384.0
-		v[i] = float32(i+1) / 384.0
-	}
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		cosineSimilarity(a, v)
-	}
-}
-
-func openTestBM25B(b *testing.B) (*BM25Index, func()) {
+func openTestBM25B(b *testing.B) (*symbol.LexicalIndex, func()) {
 	b.Helper()
 	dir, err := mkTmpDir("bench-bm25-")
 	if err != nil {
@@ -82,7 +64,7 @@ func openTestBM25B(b *testing.B) (*BM25Index, func()) {
 	if err != nil {
 		b.Fatal(err)
 	}
-	idx, err := NewBM25IndexWithDir(dir, "testrepo", s)
+	idx, err := symbol.NewLexicalIndexWithDir(dir, "testrepo", s)
 	if err != nil {
 		s.Close()
 		rmDir(dir)

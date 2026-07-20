@@ -5,7 +5,7 @@ import (
 	"os"
 	"testing"
 
-	"github.com/mengshi02/codetrip/internal/store"
+	store "github.com/mengshi02/codetrip/internal/storage"
 )
 
 func openTestGS(t *testing.T) *GraphStore {

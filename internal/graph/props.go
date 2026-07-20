@@ -25,9 +25,8 @@ type NodeProps struct {
 	Line int `json:"line,omitempty" msgpack:"line,omitempty"`
 
 	// File metadata (File node)
-	Language    string `json:"language,omitempty" msgpack:"language,omitempty"`
-	ContentHash string `json:"contentHash,omitempty" msgpack:"contentHash,omitempty"`
-	LineCount   int    `json:"lineCount,omitempty" msgpack:"lineCount,omitempty"`
+	Language  string `json:"language,omitempty" msgpack:"language,omitempty"`
+	LineCount int    `json:"lineCount,omitempty" msgpack:"lineCount,omitempty"`
 
 	// Scan metadata (Project node)
 	FileCount int `json:"fileCount,omitempty" msgpack:"fileCount,omitempty"`
@@ -63,9 +62,9 @@ type NodeProps struct {
 	BaseTypes []string `json:"baseTypes,omitempty" msgpack:"baseTypes,omitempty"`
 
 	// Community detection
-	Cohesion     float64 `json:"cohesion,omitempty" msgpack:"cohesion,omitempty"`
-	SymbolCount  int     `json:"symbolCount,omitempty" msgpack:"symbolCount,omitempty"`
-	GroupID      string  `json:"groupId,omitempty" msgpack:"groupId,omitempty"`
+	Cohesion    float64 `json:"cohesion,omitempty" msgpack:"cohesion,omitempty"`
+	SymbolCount int     `json:"symbolCount,omitempty" msgpack:"symbolCount,omitempty"`
+	GroupID     string  `json:"groupId,omitempty" msgpack:"groupId,omitempty"`
 
 	// Process
 	EntryPointID string `json:"entryPointID,omitempty" msgpack:"entryPointID,omitempty"`
@@ -73,12 +72,12 @@ type NodeProps struct {
 	ProcessType  string `json:"processType,omitempty" msgpack:"processType,omitempty"`
 
 	// CFG
-	FuncID       string `json:"funcID,omitempty" msgpack:"funcID,omitempty"`
-	FuncName     string `json:"funcName,omitempty" msgpack:"funcName,omitempty"`
-	BlockLabel   string `json:"blockLabel,omitempty" msgpack:"blockLabel,omitempty"`
+	FuncID       string   `json:"funcID,omitempty" msgpack:"funcID,omitempty"`
+	FuncName     string   `json:"funcName,omitempty" msgpack:"funcName,omitempty"`
+	BlockLabel   string   `json:"blockLabel,omitempty" msgpack:"blockLabel,omitempty"`
 	NodeIDs      []string `json:"nodeIDs,omitempty" msgpack:"nodeIDs,omitempty"`
 	StatementIDs []string `json:"statementIDs,omitempty" msgpack:"statementIDs,omitempty"`
-	SiteType     string `json:"siteType,omitempty" msgpack:"siteType,omitempty"`
+	SiteType     string   `json:"siteType,omitempty" msgpack:"siteType,omitempty"`
 
 	// Section level
 	Level int `json:"level,omitempty" msgpack:"level,omitempty"`
@@ -125,13 +124,13 @@ type EdgeProps struct {
 	HopIndex   int    `json:"hopIndex,omitempty" msgpack:"hopIndex,omitempty"`
 
 	// CFG edge
-	EdgeType   string `json:"edgeType,omitempty" msgpack:"edgeType,omitempty"`
-	Condition  string `json:"condition,omitempty" msgpack:"condition,omitempty"`
-	FuncID     string `json:"funcID,omitempty" msgpack:"funcID,omitempty"`
+	EdgeType  string `json:"edgeType,omitempty" msgpack:"edgeType,omitempty"`
+	Condition string `json:"condition,omitempty" msgpack:"condition,omitempty"`
+	FuncID    string `json:"funcID,omitempty" msgpack:"funcID,omitempty"`
 
 	// Call resolution
-	ReturnType        string `json:"returnType,omitempty" msgpack:"returnType,omitempty"`
-	SameFile          bool   `json:"sameFile,omitempty" msgpack:"sameFile,omitempty"`
+	ReturnType         string `json:"returnType,omitempty" msgpack:"returnType,omitempty"`
+	SameFile           bool   `json:"sameFile,omitempty" msgpack:"sameFile,omitempty"`
 	OverloadResolution string `json:"overloadResolution,omitempty" msgpack:"overloadResolution,omitempty"`
 
 	// Process step
@@ -169,8 +168,6 @@ func (p *NodeProps) SetProp(key string, val any) {
 		p.Line = toInt(val)
 	case "language":
 		p.Language = toString(val)
-	case "contentHash":
-		p.ContentHash = toString(val)
 	case "lineCount":
 		p.LineCount = toInt(val)
 	case "fileCount":
@@ -271,10 +268,6 @@ func (p NodeProps) GetProp(key string) (any, bool) {
 	case "language":
 		if p.Language != "" {
 			return p.Language, true
-		}
-	case "contentHash":
-		if p.ContentHash != "" {
-			return p.ContentHash, true
 		}
 	case "lineCount":
 		if p.LineCount != 0 {
@@ -436,48 +429,129 @@ func (p NodeProps) GetProp(key string) (any, bool) {
 // Keys returns all property keys (for iteration)
 func (p NodeProps) Keys() []string {
 	var keys []string
-	if p.StartLine != 0 { keys = append(keys, "startLine") }
-	if p.EndLine != 0 { keys = append(keys, "endLine") }
-	if p.Line != 0 { keys = append(keys, "line") }
-	if p.Language != "" { keys = append(keys, "language") }
-	if p.ContentHash != "" { keys = append(keys, "contentHash") }
-	if p.LineCount != 0 { keys = append(keys, "lineCount") }
-	if p.FileCount != 0 { keys = append(keys, "fileCount") }
-	if p.TotalSize != 0 { keys = append(keys, "totalSize") }
-	if p.IsExported { keys = append(keys, "isExported") }
-	if p.IsAsync { keys = append(keys, "isAsync") }
-	if p.IsWildcard { keys = append(keys, "isWildcard") }
-	if p.IsParam { keys = append(keys, "isParam") }
-	if p.Alias != "" { keys = append(keys, "alias") }
-	if p.Receiver != "" { keys = append(keys, "receiver") }
-	if p.Path != "" { keys = append(keys, "path") }
-	if p.Method != "" { keys = append(keys, "method") }
-	if p.Description != "" { keys = append(keys, "description") }
-	if p.HandlerID != "" { keys = append(keys, "handlerId") }
-	if p.InputSchema != "" { keys = append(keys, "inputSchema") }
-	if p.Arity != 0 { keys = append(keys, "arity") }
-	if p.BaseTypes != nil { keys = append(keys, "baseTypes") }
-	if p.Cohesion != 0 { keys = append(keys, "cohesion") }
-	if p.SymbolCount != 0 { keys = append(keys, "symbolCount") }
-	if p.GroupID != "" { keys = append(keys, "groupId") }
-	if p.EntryPointID != "" { keys = append(keys, "entryPointID") }
-	if p.StepCount != 0 { keys = append(keys, "stepCount") }
-	if p.ProcessType != "" { keys = append(keys, "processType") }
-	if p.FuncID != "" { keys = append(keys, "funcID") }
-	if p.FuncName != "" { keys = append(keys, "funcName") }
-	if p.BlockLabel != "" { keys = append(keys, "blockLabel") }
-	if p.NodeIDs != nil { keys = append(keys, "nodeIDs") }
-	if p.StatementIDs != nil { keys = append(keys, "statementIDs") }
-	if p.SiteType != "" { keys = append(keys, "siteType") }
-	if p.Level != 0 { keys = append(keys, "level") }
-	if p.ORMModel { keys = append(keys, "ormModel") }
-	if p.Operation != "" { keys = append(keys, "operation") }
-	if p.Model != "" { keys = append(keys, "model") }
-	if p.Module != "" { keys = append(keys, "module") }
-	if p.ArtifactID != "" { keys = append(keys, "artifactId") }
-	if p.Middleware != nil { keys = append(keys, "middleware") }
-	if p.ResponseKeys != nil { keys = append(keys, "responseKeys") }
-	if p.ErrorKeys != nil { keys = append(keys, "errorKeys") }
+	if p.StartLine != 0 {
+		keys = append(keys, "startLine")
+	}
+	if p.EndLine != 0 {
+		keys = append(keys, "endLine")
+	}
+	if p.Line != 0 {
+		keys = append(keys, "line")
+	}
+	if p.Language != "" {
+		keys = append(keys, "language")
+	}
+	if p.LineCount != 0 {
+		keys = append(keys, "lineCount")
+	}
+	if p.FileCount != 0 {
+		keys = append(keys, "fileCount")
+	}
+	if p.TotalSize != 0 {
+		keys = append(keys, "totalSize")
+	}
+	if p.IsExported {
+		keys = append(keys, "isExported")
+	}
+	if p.IsAsync {
+		keys = append(keys, "isAsync")
+	}
+	if p.IsWildcard {
+		keys = append(keys, "isWildcard")
+	}
+	if p.IsParam {
+		keys = append(keys, "isParam")
+	}
+	if p.Alias != "" {
+		keys = append(keys, "alias")
+	}
+	if p.Receiver != "" {
+		keys = append(keys, "receiver")
+	}
+	if p.Path != "" {
+		keys = append(keys, "path")
+	}
+	if p.Method != "" {
+		keys = append(keys, "method")
+	}
+	if p.Description != "" {
+		keys = append(keys, "description")
+	}
+	if p.HandlerID != "" {
+		keys = append(keys, "handlerId")
+	}
+	if p.InputSchema != "" {
+		keys = append(keys, "inputSchema")
+	}
+	if p.Arity != 0 {
+		keys = append(keys, "arity")
+	}
+	if p.BaseTypes != nil {
+		keys = append(keys, "baseTypes")
+	}
+	if p.Cohesion != 0 {
+		keys = append(keys, "cohesion")
+	}
+	if p.SymbolCount != 0 {
+		keys = append(keys, "symbolCount")
+	}
+	if p.GroupID != "" {
+		keys = append(keys, "groupId")
+	}
+	if p.EntryPointID != "" {
+		keys = append(keys, "entryPointID")
+	}
+	if p.StepCount != 0 {
+		keys = append(keys, "stepCount")
+	}
+	if p.ProcessType != "" {
+		keys = append(keys, "processType")
+	}
+	if p.FuncID != "" {
+		keys = append(keys, "funcID")
+	}
+	if p.FuncName != "" {
+		keys = append(keys, "funcName")
+	}
+	if p.BlockLabel != "" {
+		keys = append(keys, "blockLabel")
+	}
+	if p.NodeIDs != nil {
+		keys = append(keys, "nodeIDs")
+	}
+	if p.StatementIDs != nil {
+		keys = append(keys, "statementIDs")
+	}
+	if p.SiteType != "" {
+		keys = append(keys, "siteType")
+	}
+	if p.Level != 0 {
+		keys = append(keys, "level")
+	}
+	if p.ORMModel {
+		keys = append(keys, "ormModel")
+	}
+	if p.Operation != "" {
+		keys = append(keys, "operation")
+	}
+	if p.Model != "" {
+		keys = append(keys, "model")
+	}
+	if p.Module != "" {
+		keys = append(keys, "module")
+	}
+	if p.ArtifactID != "" {
+		keys = append(keys, "artifactId")
+	}
+	if p.Middleware != nil {
+		keys = append(keys, "middleware")
+	}
+	if p.ResponseKeys != nil {
+		keys = append(keys, "responseKeys")
+	}
+	if p.ErrorKeys != nil {
+		keys = append(keys, "errorKeys")
+	}
 	for k := range p.Extra {
 		keys = append(keys, k)
 	}
@@ -488,7 +562,7 @@ func (p NodeProps) Keys() []string {
 // IsEmpty returns true if no properties are set
 func (p NodeProps) IsEmpty() bool {
 	return p.StartLine == 0 && p.EndLine == 0 && p.Line == 0 &&
-		p.Language == "" && p.ContentHash == "" && p.LineCount == 0 &&
+		p.Language == "" && p.LineCount == 0 &&
 		p.FileCount == 0 && p.TotalSize == 0 &&
 		!p.IsExported && !p.IsAsync && !p.IsWildcard && !p.IsParam &&
 		p.Alias == "" && p.Receiver == "" && p.Path == "" && p.Method == "" &&
@@ -706,27 +780,69 @@ func (p NodeProps) ToMap() map[string]any {
 // ToMap converts EdgeProps back to map[string]any (for compatibility)
 func (p EdgeProps) ToMap() map[string]any {
 	m := make(map[string]any)
-	if p.Confidence != 0 { m["confidence"] = p.Confidence }
-	if p.Line != 0 { m["line"] = p.Line }
-	if p.File != "" { m["file"] = p.File }
-	if p.ImportPath != "" { m["importPath"] = p.ImportPath }
-	if p.Alias != "" { m["alias"] = p.Alias }
-	if p.Category != "" { m["category"] = p.Category }
-	if p.SourceName != "" { m["sourceName"] = p.SourceName }
-	if p.SinkName != "" { m["sinkName"] = p.SinkName }
-	if p.Sanitized { m["sanitized"] = p.Sanitized }
-	if p.HopIndex != 0 { m["hopIndex"] = p.HopIndex }
-	if p.EdgeType != "" { m["edgeType"] = p.EdgeType }
-	if p.Condition != "" { m["condition"] = p.Condition }
-	if p.FuncID != "" { m["funcID"] = p.FuncID }
-	if p.ReturnType != "" { m["returnType"] = p.ReturnType }
-	if p.SameFile { m["sameFile"] = p.SameFile }
-	if p.OverloadResolution != "" { m["overloadResolution"] = p.OverloadResolution }
-	if p.Order != 0 { m["order"] = p.Order }
-	if p.Weight != 0 { m["weight"] = p.Weight }
-	if p.Operation != "" { m["operation"] = p.Operation }
-	if p.Model != "" { m["model"] = p.Model }
-	if p.Topic != "" { m["topic"] = p.Topic }
+	if p.Confidence != 0 {
+		m["confidence"] = p.Confidence
+	}
+	if p.Line != 0 {
+		m["line"] = p.Line
+	}
+	if p.File != "" {
+		m["file"] = p.File
+	}
+	if p.ImportPath != "" {
+		m["importPath"] = p.ImportPath
+	}
+	if p.Alias != "" {
+		m["alias"] = p.Alias
+	}
+	if p.Category != "" {
+		m["category"] = p.Category
+	}
+	if p.SourceName != "" {
+		m["sourceName"] = p.SourceName
+	}
+	if p.SinkName != "" {
+		m["sinkName"] = p.SinkName
+	}
+	if p.Sanitized {
+		m["sanitized"] = p.Sanitized
+	}
+	if p.HopIndex != 0 {
+		m["hopIndex"] = p.HopIndex
+	}
+	if p.EdgeType != "" {
+		m["edgeType"] = p.EdgeType
+	}
+	if p.Condition != "" {
+		m["condition"] = p.Condition
+	}
+	if p.FuncID != "" {
+		m["funcID"] = p.FuncID
+	}
+	if p.ReturnType != "" {
+		m["returnType"] = p.ReturnType
+	}
+	if p.SameFile {
+		m["sameFile"] = p.SameFile
+	}
+	if p.OverloadResolution != "" {
+		m["overloadResolution"] = p.OverloadResolution
+	}
+	if p.Order != 0 {
+		m["order"] = p.Order
+	}
+	if p.Weight != 0 {
+		m["weight"] = p.Weight
+	}
+	if p.Operation != "" {
+		m["operation"] = p.Operation
+	}
+	if p.Model != "" {
+		m["model"] = p.Model
+	}
+	if p.Topic != "" {
+		m["topic"] = p.Topic
+	}
 	for k, v := range p.Extra {
 		m[k] = v
 	}

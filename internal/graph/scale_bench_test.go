@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/mengshi02/codetrip/internal/store"
+	store "github.com/mengshi02/codetrip/internal/storage"
 )
 
 // benchPerfGS creates a GraphStore for performance benchmarks.
@@ -318,8 +318,8 @@ func BenchmarkPerf_IndexBuild_EndToEnd(b *testing.B) {
 // TestPerf_BFS_Depth3_Under2s verifies BFS(maxDepth=3) completes in < 2s
 // on a 100K-node wide graph.
 func TestPerf_BFS_Depth3_Under2s(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping perf test in short mode")
+	if testing.Short() || os.Getenv("CODETRIP_PERF_TESTS") == "" {
+		t.Skip("set CODETRIP_PERF_TESTS=1 to run performance tests")
 	}
 
 	gs := openTestGSLarge(t)
@@ -342,8 +342,8 @@ func TestPerf_BFS_Depth3_Under2s(t *testing.T) {
 // TestPerf_ShortestPath_Under3s verifies ShortestPath completes in < 3s
 // on a 10K-node chain graph.
 func TestPerf_ShortestPath_Under3s(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping perf test in short mode")
+	if testing.Short() || os.Getenv("CODETRIP_PERF_TESTS") == "" {
+		t.Skip("set CODETRIP_PERF_TESTS=1 to run performance tests")
 	}
 
 	gs := openTestGSLarge(t)
@@ -366,8 +366,8 @@ func TestPerf_ShortestPath_Under3s(t *testing.T) {
 // TestPerf_MemoryUnder4GB verifies per-node memory overhead is reasonable,
 // extrapolating to < 4GB at 1M nodes (after adjCache removal).
 func TestPerf_MemoryUnder4GB(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping perf test in short mode")
+	if testing.Short() || os.Getenv("CODETRIP_PERF_TESTS") == "" {
+		t.Skip("set CODETRIP_PERF_TESTS=1 to run performance tests")
 	}
 
 	gs := openTestGSLarge(t)

@@ -7,7 +7,8 @@ import (
 	"path/filepath"
 
 	"github.com/mengshi02/codetrip/internal/graph"
-	"github.com/mengshi02/codetrip/internal/store"
+	"github.com/mengshi02/codetrip/internal/search/symbol"
+	store "github.com/mengshi02/codetrip/internal/storage"
 )
 
 func openTestHybrid(t *testing.T) (*HybridSearch, func()) {
@@ -21,15 +22,15 @@ func openTestHybrid(t *testing.T) (*HybridSearch, func()) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	bm25, err := NewBM25IndexWithDir(dir, "testrepo", s)
+	lexical, err := symbol.NewLexicalIndexWithDir(dir, "testrepo", s)
 	if err != nil {
 		s.Close()
 		os.RemoveAll(dir)
 		t.Fatal(err)
 	}
-	hs := NewHybridSearch(bm25, nil) // no vector search for unit test
+	hs := NewHybridSearch(lexical, nil) // no vector search for unit test
 	cleanup := func() {
-		bm25.Close()
+		lexical.Close()
 		s.Close()
 		os.RemoveAll(dir)
 	}
@@ -42,11 +43,11 @@ func TestHybridSearch_BM25Only(t *testing.T) {
 
 	node := graph.NewNode("testrepo", graph.LabelFunction, "searchUser").WithID("hybrid-node-1")
 	node.FilePath = "pkg/user/service.go"
-	if err := hs.bm25.IndexNode(node); err != nil {
+	if err := hs.lexical.IndexNode(node); err != nil {
 		t.Fatal(err)
 	}
 
-	if err := hs.bm25.FinalizeBuild(); err != nil {
+	if err := hs.lexical.FinalizeBuild(); err != nil {
 		t.Fatal(err)
 	}
 
@@ -67,11 +68,11 @@ func TestHybridSearch_RRFScore(t *testing.T) {
 	n1.FilePath = "pkg/order/service.go"
 	n2 := graph.NewNode("testrepo", graph.LabelFunction, "createPayment").WithID("rrf-node-2")
 	n2.FilePath = "pkg/payment/service.go"
-	if err := hs.bm25.BatchIndex([]*graph.Node{n1, n2}); err != nil {
+	if err := hs.lexical.BatchIndex([]*graph.Node{n1, n2}); err != nil {
 		t.Fatal(err)
 	}
 
-	if err := hs.bm25.FinalizeBuild(); err != nil {
+	if err := hs.lexical.FinalizeBuild(); err != nil {
 		t.Fatal(err)
 	}
 
@@ -98,11 +99,11 @@ func TestHybridSearch_Limit(t *testing.T) {
 	for i := 0; i < 10; i++ {
 		nodes[i] = graph.NewNode("testrepo", graph.LabelFunction, "func"+string(rune('A'+i)))
 	}
-	if err := hs.bm25.BatchIndex(nodes); err != nil {
+	if err := hs.lexical.BatchIndex(nodes); err != nil {
 		t.Fatal(err)
 	}
 
-	if err := hs.bm25.FinalizeBuild(); err != nil {
+	if err := hs.lexical.FinalizeBuild(); err != nil {
 		t.Fatal(err)
 	}
 

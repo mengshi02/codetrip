@@ -29,12 +29,12 @@ var (
 
 // adjEntrySlicePool reuses []*Edge slices returned by GetAllOutEdges/GetAllInEdges.
 var adjEntrySlicePool = sync.Pool{
-	New: func() any { return make([]*Edge, 0, 32) },
+	New: func() any { value := make([]*Edge, 0, 32); return &value },
 }
 
 // nodeSlicePool reuses []*Node slices for BFS/ShortestPath results.
 var nodeSlicePool = sync.Pool{
-	New: func() any { return make([]*Node, 0, 64) },
+	New: func() any { value := make([]*Node, 0, 64); return &value },
 }
 
 // AdjEntry represents an adjacency index entry (Scheme A: properties embedded in adjacency index value)
@@ -153,6 +153,9 @@ func (s *GraphStore) BufferNode(node *Node) error {
 func (s *GraphStore) BufferEdge(edge *Edge) error {
 	if edge.ID == "" {
 		edge.ID = util.GenerateEdgeID(s.repo, edge.Source, string(edge.Type), edge.Target)
+	}
+	if edge.Repo == "" {
+		edge.Repo = s.repo
 	}
 
 	s.bufMu.Lock()
@@ -500,6 +503,9 @@ func (s *GraphStore) AddEdge(edge *Edge) error {
 	if edge.ID == "" {
 		edge.ID = util.GenerateEdgeID(s.repo, edge.Source, string(edge.Type), edge.Target)
 	}
+	if edge.Repo == "" {
+		edge.Repo = s.repo
+	}
 
 	data, err := Encode(edge)
 	if err != nil {
@@ -529,7 +535,7 @@ func (s *GraphStore) AddEdge(edge *Edge) error {
 
 // GetEdge retrieves an edge
 func (s *GraphStore) GetEdge(id string) (*Edge, error) {
-	key := edgeKey(id)
+	key := edgeKey(s.repo, id)
 	data, err := s.store.Get([]byte(key))
 	if err != nil {
 		return nil, fmt.Errorf("get edge %s: %w", id, err)
@@ -661,11 +667,11 @@ func (s *GraphStore) BFS(ctx context.Context, startID string, direction Traverse
 
 		var edges []*Edge
 
-		switch direction {
-		case TraverseOut, TraverseBoth:
+		if direction == TraverseOut || direction == TraverseBoth {
 			outEdges, _ := s.GetAllOutEdges(entry.id)
 			edges = append(edges, outEdges...)
-		case TraverseIn:
+		}
+		if direction == TraverseIn || direction == TraverseBoth {
 			inEdges, _ := s.GetAllInEdges(entry.id)
 			edges = append(edges, inEdges...)
 		}
@@ -676,7 +682,7 @@ func (s *GraphStore) BFS(ctx context.Context, startID string, direction Traverse
 			}
 
 			nextID := edge.Target
-			if direction == TraverseIn {
+			if edge.Target == entry.id {
 				nextID = edge.Source
 			}
 
@@ -1023,7 +1029,8 @@ func ReleaseEdges(edges []*Edge) {
 	if edges == nil {
 		return
 	}
-	adjEntrySlicePool.Put(edges[:0])
+	edges = edges[:0]
+	adjEntrySlicePool.Put(&edges)
 }
 
 // ReleaseNodes returns a node slice to the sync.Pool for reuse.
@@ -1032,7 +1039,8 @@ func ReleaseNodes(nodes []*Node) {
 	if nodes == nil {
 		return
 	}
-	nodeSlicePool.Put(nodes[:0])
+	nodes = nodes[:0]
+	nodeSlicePool.Put(&nodes)
 }
 
 // getAdjTargets retrieves target ID list from adjacency index
@@ -1058,7 +1066,7 @@ func (s *GraphStore) getAdjTargets(nodeID, direction, relType string) ([]string,
 // Uses sync.Pool for edge slice reuse to reduce GC pressure on large graphs.
 func (s *GraphStore) GetAllOutEdges(nodeID string) ([]*Edge, error) {
 	prefix := adjScanPrefix(s.repo, nodeID, "out")
-	edges := adjEntrySlicePool.Get().([]*Edge)[:0]
+	edges := (*adjEntrySlicePool.Get().(*[]*Edge))[:0]
 
 	err := s.store.ScanPrefix([]byte(prefix), func(key, val []byte) error {
 		entries, err := DecodeAdjEntries(val)
@@ -1125,7 +1133,7 @@ func (s *GraphStore) ScanAllOutEdgesByRelType(relType string) ([]*Edge, error) {
 // Uses sync.Pool for edge slice reuse to reduce GC pressure on large graphs.
 func (s *GraphStore) GetAllInEdges(nodeID string) ([]*Edge, error) {
 	prefix := adjScanPrefix(s.repo, nodeID, "in")
-	edges := adjEntrySlicePool.Get().([]*Edge)[:0]
+	edges := (*adjEntrySlicePool.Get().(*[]*Edge))[:0]
 
 	err := s.store.ScanPrefix([]byte(prefix), func(key, val []byte) error {
 		entries, err := DecodeAdjEntries(val)
@@ -1266,7 +1274,7 @@ func (s *GraphStore) Repo() string {
 	return s.repo
 }
 
-// Store returns the underlying Pebble Store (for use by BM25Index and other modules)
+// Store returns the underlying Pebble Store (for use by LexicalIndex and other modules)
 func (s *GraphStore) Store() *store.Store {
 	return s.store
 }
@@ -1356,6 +1364,9 @@ func (b *Batch) AddNode(node *Node) error {
 func (b *Batch) AddEdge(edge *Edge) error {
 	if edge.ID == "" {
 		edge.ID = util.GenerateEdgeID(b.graphStore.repo, edge.Source, string(edge.Type), edge.Target)
+	}
+	if edge.Repo == "" {
+		edge.Repo = b.graphStore.repo
 	}
 	b.edges[edge.ID] = edge
 

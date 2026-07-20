@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/mengshi02/codetrip/internal/store"
+	store "github.com/mengshi02/codetrip/internal/storage"
 )
 
 // openTestGSLarge creates a GraphStore with larger cache for scale tests.

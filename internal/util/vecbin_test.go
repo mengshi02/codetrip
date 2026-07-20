@@ -33,7 +33,7 @@ func TestEncodeDecodeFloat32Vec_Empty(t *testing.T) {
 }
 
 func TestEncodeDecodeFloat32Vec_SpecialValues(t *testing.T) {
-	vec := []float32{float32(math.Inf(1)), float32(math.Inf(-1)), float32(math.NaN()), 0.0, -0.0}
+	vec := []float32{float32(math.Inf(1)), float32(math.Inf(-1)), float32(math.NaN()), 0.0, float32(math.Copysign(0, -1))}
 	encoded := EncodeFloat32Vec(vec)
 	decoded := DecodeFloat32Vec(encoded)
 

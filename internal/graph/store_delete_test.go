@@ -5,7 +5,7 @@ import (
 )
 
 // TestDeleteNode_ReverseAdjCleanup verifies that DeleteNode correctly cleans up
-// reverse adjacency indexes on connected nodes (the core precision fix for incremental indexing).
+// reverse adjacency indexes on connected nodes.
 //
 // Scenario: A → CALLS → B. Delete A.
 // Expected: B's in-adjacency no longer references A.

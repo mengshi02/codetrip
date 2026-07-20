@@ -57,25 +57,25 @@ type MetricsSnapshot struct {
 }
 
 // GetMetrics returns a snapshot of current metrics
-func (trip *Trip) GetMetrics() MetricsSnapshot {
+func (e *Engine) GetMetrics() MetricsSnapshot {
 	return MetricsSnapshot{
-		IndexRepoTotal:   trip.metrics.IndexRepoTotal.Load(),
-		IndexRepoSuccess: trip.metrics.IndexRepoSuccess.Load(),
-		IndexRepoFail:    trip.metrics.IndexRepoFail.Load(),
-		DropIndexTotal:   trip.metrics.DropIndexTotal.Load(),
-		ReIndexTotal:     trip.metrics.ReIndexTotal.Load(),
-		ReIndexSuccess:   trip.metrics.ReIndexSuccess.Load(),
-		ReIndexFail:      trip.metrics.ReIndexFail.Load(),
-		ImpactQueries:    trip.metrics.ImpactQueries.Load(),
-		SearchQueries:    trip.metrics.SearchQueries.Load(),
-		ContextQueries:   trip.metrics.ContextQueries.Load(),
-		RenameQueries:    trip.metrics.RenameQueries.Load(),
-		NodeReads:        trip.metrics.NodeReads.Load(),
-		EdgeReads:        trip.metrics.EdgeReads.Load(),
-		NodeWrites:       trip.metrics.NodeWrites.Load(),
-		EdgeWrites:       trip.metrics.EdgeWrites.Load(),
-		NodeCacheHits:    trip.metrics.NodeCacheHits.Load(),
-		NodeCacheMisses:  trip.metrics.NodeCacheMisses.Load(),
-		Errors:           trip.metrics.Errors.Load(),
+		IndexRepoTotal:   e.metrics.IndexRepoTotal.Load(),
+		IndexRepoSuccess: e.metrics.IndexRepoSuccess.Load(),
+		IndexRepoFail:    e.metrics.IndexRepoFail.Load(),
+		DropIndexTotal:   e.metrics.DropIndexTotal.Load(),
+		ReIndexTotal:     e.metrics.ReIndexTotal.Load(),
+		ReIndexSuccess:   e.metrics.ReIndexSuccess.Load(),
+		ReIndexFail:      e.metrics.ReIndexFail.Load(),
+		ImpactQueries:    e.metrics.ImpactQueries.Load(),
+		SearchQueries:    e.metrics.SearchQueries.Load(),
+		ContextQueries:   e.metrics.ContextQueries.Load(),
+		RenameQueries:    e.metrics.RenameQueries.Load(),
+		NodeReads:        e.metrics.NodeReads.Load(),
+		EdgeReads:        e.metrics.EdgeReads.Load(),
+		NodeWrites:       e.metrics.NodeWrites.Load(),
+		EdgeWrites:       e.metrics.EdgeWrites.Load(),
+		NodeCacheHits:    e.metrics.NodeCacheHits.Load(),
+		NodeCacheMisses:  e.metrics.NodeCacheMisses.Load(),
+		Errors:           e.metrics.Errors.Load(),
 	}
 }

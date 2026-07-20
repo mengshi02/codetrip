@@ -52,9 +52,10 @@ func TestEdge_Confidence(t *testing.T) {
 
 func TestEdge_Key(t *testing.T) {
 	e := NewEdge(RelCalls, "src1", "tgt1").WithID("edge123")
+	e.Repo = "repo1"
 	key := e.Key()
-	if key != "e:edge123" {
-		t.Errorf("Key = %s, want e:edge123", key)
+	if key != "e:repo1:edge123" {
+		t.Errorf("Key = %s, want e:repo1:edge123", key)
 	}
 }
 

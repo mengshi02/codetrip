@@ -31,6 +31,25 @@ func TestBFS(t *testing.T) {
 	}
 }
 
+func TestBFSBothTraversesIncomingAndOutgoing(t *testing.T) {
+	gs := openTestGS(t)
+	a := NewNode("testrepo", LabelFunction, "A")
+	b := NewNode("testrepo", LabelFunction, "B")
+	c := NewNode("testrepo", LabelFunction, "C")
+	for _, node := range []*Node{a, b, c} {
+		addN(gs, node)
+	}
+	addE(gs, NewEdge(RelCalls, a.ID, b.ID))
+	addE(gs, NewEdge(RelCalls, c.ID, b.ID))
+	result, err := gs.BFS(context.Background(), b.ID, TraverseBoth, 1, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result) != 2 {
+		t.Fatalf("BFS both returned %d nodes, want 2", len(result))
+	}
+}
+
 func TestBFS_MaxDepth(t *testing.T) {
 	gs := openTestGS(t)
 	nA := NewNode("testrepo", LabelFunction, "A")

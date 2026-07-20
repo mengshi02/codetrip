@@ -41,6 +41,7 @@ const (
 // Edge represents a graph edge
 type Edge struct {
 	ID     string    `json:"id"`
+	Repo   string    `json:"repo"`
 	Type   RelType   `json:"type"`
 	Source string    `json:"source"`
 	Target string    `json:"target"`
@@ -101,6 +102,22 @@ func (e *Edge) GetPropFloat64(key string) float64 {
 	return 0
 }
 
+func (e *Edge) GetPropInt(key string) int {
+	v := e.GetProp(key, 0)
+	switch value := v.(type) {
+	case int:
+		return value
+	case int32:
+		return int(value)
+	case int64:
+		return int(value)
+	case float64:
+		return int(value)
+	default:
+		return 0
+	}
+}
+
 // Confidence returns the edge confidence score
 func (e *Edge) Confidence() float64 {
 	v := e.GetProp("confidence", 1.0)
@@ -118,7 +135,7 @@ func (e *Edge) Confidence() float64 {
 
 // Key returns the Pebble KV storage key
 func (e *Edge) Key() string {
-	return edgeKey(e.ID)
+	return edgeKey(e.Repo, e.ID)
 }
 
 // EdgeFilter is an edge filtering function
@@ -128,7 +145,7 @@ type EdgeFilter func(*Edge) bool
 type TraverseDir int
 
 const (
-	TraverseOut TraverseDir = iota // Outgoing edge direction
+	TraverseOut  TraverseDir = iota // Outgoing edge direction
 	TraverseIn                      // Incoming edge direction
 	TraverseBoth                    // Both directions
 )

@@ -6,7 +6,7 @@ import (
 	"os"
 	"testing"
 
-	"github.com/mengshi02/codetrip/internal/store"
+	store "github.com/mengshi02/codetrip/internal/storage"
 )
 
 func benchGS(b *testing.B) *GraphStore {
