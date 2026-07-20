@@ -1,0 +1,152 @@
+name: Release binaries
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: ${{ matrix.goos }}/${{ matrix.goarch }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-24.04
+            goos: linux
+            goarch: amd64
+          - runner: ubuntu-24.04-arm
+            goos: linux
+            goarch: arm64
+          - runner: macos-15-intel
+            goos: darwin
+            goarch: amd64
+          - runner: macos-15
+            goos: darwin
+            goarch: arm64
+          - runner: windows-2025
+            goos: windows
+            goarch: amd64
+            extension: .exe
+
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Install Windows C toolchain
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          choco install mingw make --no-progress -y
+          $env:Path = [Environment]::GetEnvironmentVariable("Path", "Machine") + ";" + [Environment]::GetEnvironmentVariable("Path", "User")
+          $gccDir = Split-Path (Get-Command gcc).Source
+          $gccDir | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+          gcc --version
+
+      - name: Build release binary
+        shell: bash
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          OUTPUT: bin/codetrip-${{ matrix.goos }}-${{ matrix.goarch }}${{ matrix.extension }}
+        run: make release-build
+
+      - name: Verify embedded version
+        if: runner.os != 'Windows'
+        shell: bash
+        run: test "$(bin/codetrip-${{ matrix.goos }}-${{ matrix.goarch }} version)" = "$(tr -d '\n' < VERSION)"
+
+      - name: Verify embedded version on Windows
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $actual = & bin/codetrip-windows-amd64.exe version
+          $expected = (Get-Content VERSION -Raw).Trim()
+          if ($actual.Trim() -ne $expected) { throw "version mismatch: $actual != $expected" }
+
+      - name: Verify Linux static linkage
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          file bin/codetrip-${{ matrix.goos }}-${{ matrix.goarch }}
+          if ldd bin/codetrip-${{ matrix.goos }}-${{ matrix.goarch }} 2>&1 | grep -vq "not a dynamic executable\|statically linked"; then
+            echo "Linux artifact has unexpected dynamic dependencies"
+            ldd bin/codetrip-${{ matrix.goos }}-${{ matrix.goarch }}
+            exit 1
+          fi
+
+      - name: Verify macOS system-only linkage
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          file bin/codetrip-${{ matrix.goos }}-${{ matrix.goarch }}
+          if otool -L bin/codetrip-${{ matrix.goos }}-${{ matrix.goarch }} | tail -n +2 | grep -Ev '^\s+(/usr/lib/|/System/Library/)'; then
+            echo "macOS artifact has a non-system dynamic dependency"
+            exit 1
+          fi
+
+      - name: Verify Windows runtime dependencies
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $imports = (& objdump -p bin/codetrip-windows-amd64.exe | Select-String "DLL Name").Line
+          $unexpected = $imports | Where-Object { $_ -match "(?i)(libgcc|libstdc\+\+|libwinpthread|msys|mingw)" }
+          if ($unexpected) { throw "unexpected compiler runtime dependency: $unexpected" }
+
+      - name: Package Unix artifact
+        if: runner.os != 'Windows'
+        shell: bash
+        run: tar -C bin -czf codetrip-${{ matrix.goos }}-${{ matrix.goarch }}.tar.gz codetrip-${{ matrix.goos }}-${{ matrix.goarch }}
+
+      - name: Package Windows artifact
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: Compress-Archive -Path bin/codetrip-windows-amd64.exe -DestinationPath codetrip-windows-amd64.zip
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: codetrip-${{ matrix.goos }}-${{ matrix.goarch }}
+          path: codetrip-${{ matrix.goos }}-${{ matrix.goarch }}.*
+          if-no-files-found: error
+
+  publish:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Generate checksums
+        working-directory: dist
+        run: sha256sum codetrip-* > checksums.txt
+
+      - name: Verify release version
+        run: |
+          test "v$(tr -d '\n' < VERSION)" = "${GITHUB_REF_NAME}" || {
+            echo "tag ${GITHUB_REF_NAME} does not match VERSION v$(cat VERSION)"
+            exit 1
+          }
+
+      - name: Create GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release view "${GITHUB_REF_NAME}" >/dev/null 2>&1 || gh release create "${GITHUB_REF_NAME}" --verify-tag --generate-notes
+
+      - name: Publish GitHub release assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "${GITHUB_REF_NAME}" dist/* --clobber
