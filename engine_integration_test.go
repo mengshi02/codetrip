@@ -18,13 +18,13 @@ func TestIndexRepoPersistsValidatedGraphAndExportsCSV(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(repository, "main.go"), source, 0o644); err != nil {
 		t.Fatal(err)
 	}
-	trip, err := Open(dataDir)
+	engine, err := Open(dataDir)
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	csvDir := filepath.Join(t.TempDir(), "csv")
-	result, err := trip.IndexRepo(context.Background(), repository,
+	result, err := engine.IndexRepo(context.Background(), repository,
 		WithRepoName("fixture"), WithCSVExport(csvDir), WithCSVExportStrict(true))
 	if err != nil {
 		t.Fatal(err)
@@ -35,7 +35,7 @@ func TestIndexRepoPersistsValidatedGraphAndExportsCSV(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(csvDir, "relations.csv")); err != nil {
 		t.Fatalf("relationships CSV missing: %v", err)
 	}
-	graphStore := trip.graphStore("fixture")
+	graphStore := engine.graphStore("fixture")
 	if graphStore == nil {
 		t.Fatal("graph store not registered")
 	}
@@ -50,36 +50,36 @@ func TestIndexRepoPersistsValidatedGraphAndExportsCSV(t *testing.T) {
 	if err != nil || len(edges) != 1 {
 		t.Fatalf("Run CALLS edges: %d, error: %v", len(edges), err)
 	}
-	traversal, err := trip.Traverse(context.Background(), &TraverseRequest{
+	traversal, err := engine.Traverse(context.Background(), &TraverseRequest{
 		Repo: "fixture", StartNodeID: nodes[0].ID, Direction: TraverseOutgoing,
 		MaxDepth: 1, RelationTypes: []string{"CALLS"},
 	})
 	if err != nil || len(traversal.Nodes) != 1 || traversal.Nodes[0].Name != "Work" {
 		t.Fatalf("CALLS traversal=%#v, error=%v", traversal, err)
 	}
-	path, err := trip.ShortestPath(context.Background(), &PathRequest{
+	path, err := engine.ShortestPath(context.Background(), &PathRequest{
 		Repo: "fixture", SourceNodeID: nodes[0].ID, TargetNodeID: traversal.Nodes[0].ID,
 	})
 	if err != nil || len(path.Edges) != 1 || path.Edges[0].Type != "CALLS" {
 		t.Fatalf("shortest path=%#v, error=%v", path, err)
 	}
-	searchResult, err := trip.Search(context.Background(), &SearchRequest{Repo: "fixture", Query: "Run", Limit: 10})
+	searchResult, err := engine.Search(context.Background(), &SearchRequest{Repo: "fixture", Query: "Run", Limit: 10})
 	if err != nil || len(searchResult.Results) == 0 || searchResult.Results[0].Name != "Run" {
 		t.Fatalf("symbol search result=%#v, error=%v", searchResult, err)
 	}
-	sourceResult, err := trip.SearchSource(context.Background(), &SourceSearchRequest{Repo: "fixture", Query: "Work", Limit: 10})
+	sourceResult, err := engine.SearchSource(context.Background(), &SourceSearchRequest{Repo: "fixture", Query: "Work", Limit: 10})
 	if err != nil || len(sourceResult.Results) == 0 || sourceResult.Results[0].FilePath != "main.go" {
 		t.Fatalf("source search=%#v, error=%v", sourceResult, err)
 	}
-	embedResult, err := trip.EmbedRepo(context.Background(), "fixture", deterministicEmbedder{}, nil)
+	embedResult, err := engine.EmbedRepo(context.Background(), "fixture", deterministicEmbedder{}, nil)
 	if err != nil || embedResult.NodesEmbedded == 0 {
 		t.Fatalf("embed result=%#v, error=%v", embedResult, err)
 	}
-	hybrid, err := trip.HybridSearch(context.Background(), &HybridSearchRequest{Repo: "fixture", Query: "Run", Limit: 10})
+	hybrid, err := engine.HybridSearch(context.Background(), &HybridSearchRequest{Repo: "fixture", Query: "Run", Limit: 10})
 	if err != nil || len(hybrid.Results) == 0 {
 		t.Fatalf("hybrid search=%#v, error=%v", hybrid, err)
 	}
-	if err := trip.Close(); err != nil {
+	if err := engine.Close(); err != nil {
 		t.Fatal(err)
 	}
 
@@ -142,24 +142,24 @@ func (deterministicEmbedder) Embed(_ context.Context, texts []string) ([][]float
 
 func TestRepositoriesWithIdenticalSymbolsRemainIsolated(t *testing.T) {
 	dataDir := filepath.Join(t.TempDir(), "data")
-	trip, err := Open(dataDir)
+	engine, err := Open(dataDir)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer trip.Close()
+	defer engine.Close()
 
 	for _, repo := range []string{"first", "second"} {
 		directory := t.TempDir()
 		if err := os.WriteFile(filepath.Join(directory, "main.go"), []byte("package p\nfunc Work() {}\nfunc Run() { Work() }\n"), 0o644); err != nil {
 			t.Fatal(err)
 		}
-		if _, err := trip.IndexRepo(context.Background(), directory, WithRepoName(repo)); err != nil {
+		if _, err := engine.IndexRepo(context.Background(), directory, WithRepoName(repo)); err != nil {
 			t.Fatal(err)
 		}
 	}
 
-	first := trip.graphStore("first")
-	second := trip.graphStore("second")
+	first := engine.graphStore("first")
+	second := engine.graphStore("second")
 	if first == nil || second == nil || first.Repo() == second.Repo() {
 		t.Fatalf("snapshot stores are not isolated: first=%v second=%v", first, second)
 	}
@@ -181,32 +181,32 @@ func TestReplaceRepositoryPublishesNewSnapshotAndCollectsOldOne(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(repository, "main.go"), []byte("package p\nfunc OldName() {}\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	trip, err := Open(dataDir)
+	engine, err := Open(dataDir)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := trip.IndexRepo(context.Background(), repository, WithRepoName("fixture")); err != nil {
+	if _, err := engine.IndexRepo(context.Background(), repository, WithRepoName("fixture")); err != nil {
 		t.Fatal(err)
 	}
-	oldPhysical := trip.graphStore("fixture").Repo()
+	oldPhysical := engine.graphStore("fixture").Repo()
 	if err := os.WriteFile(filepath.Join(repository, "main.go"), []byte("package p\nfunc NewName() {}\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := trip.IndexRepo(context.Background(), repository, WithRepoName("fixture")); !errors.Is(err, ErrRepoAlreadyExists) {
+	if _, err := engine.IndexRepo(context.Background(), repository, WithRepoName("fixture")); !errors.Is(err, ErrRepoAlreadyExists) {
 		t.Fatalf("index without replace error=%v", err)
 	}
-	if _, err := trip.IndexRepo(context.Background(), repository, WithRepoName("fixture"), WithReplaceExisting(true)); err != nil {
+	if _, err := engine.IndexRepo(context.Background(), repository, WithRepoName("fixture"), WithReplaceExisting(true)); err != nil {
 		t.Fatal(err)
 	}
-	newPhysical := trip.graphStore("fixture").Repo()
+	newPhysical := engine.graphStore("fixture").Repo()
 	if newPhysical == oldPhysical {
 		t.Fatal("replacement reused physical snapshot")
 	}
-	result, err := trip.SearchSource(context.Background(), &SourceSearchRequest{Repo: "fixture", Query: "NewName", Limit: 10})
+	result, err := engine.SearchSource(context.Background(), &SourceSearchRequest{Repo: "fixture", Query: "NewName", Limit: 10})
 	if err != nil || len(result.Results) == 0 {
 		t.Fatalf("new source snapshot=%#v error=%v", result, err)
 	}
-	if err := trip.Close(); err != nil {
+	if err := engine.Close(); err != nil {
 		t.Fatal(err)
 	}
 
