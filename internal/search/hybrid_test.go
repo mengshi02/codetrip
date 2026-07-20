@@ -8,7 +8,7 @@ import (
 
 	"github.com/mengshi02/codetrip/internal/graph"
 	"github.com/mengshi02/codetrip/internal/search/symbol"
-	store "github.com/mengshi02/codetrip/internal/storage"
+	store "github.com/mengshi02/codetrip/internal/store"
 )
 
 func openTestHybrid(t *testing.T) (*HybridSearch, func()) {

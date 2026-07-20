@@ -58,6 +58,12 @@ codetrip source 'lang:go file:config ParseConfig' --repo project --context 2
 
 `search` targets indexed symbols and metadata. `source` targets file names and source contents and supports literal, regular-expression, file, and language filters.
 
+Linux and macOS use the native high-throughput source backend. Windows uses a
+portable full-text backend followed by exact line matching. The public API and
+query features are the same, but Windows source search is slower on large
+repositories. Rebuild a repository snapshot after moving its data directory
+between Windows and Linux/macOS because their source-index formats differ.
+
 ### Semantic and hybrid retrieval
 
 ```bash

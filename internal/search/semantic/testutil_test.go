@@ -4,7 +4,7 @@ import (
 	"os"
 	"path/filepath"
 
-	store "github.com/mengshi02/codetrip/internal/storage"
+	store "github.com/mengshi02/codetrip/internal/store"
 )
 
 func mkTmpDir(prefix string) (string, error) { return os.MkdirTemp("", prefix) }

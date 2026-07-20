@@ -4,7 +4,7 @@ import (
 	"testing"
 
 	ingestgraph "github.com/mengshi02/codetrip/internal/model"
-	store "github.com/mengshi02/codetrip/internal/storage"
+	store "github.com/mengshi02/codetrip/internal/store"
 )
 
 func TestImportKnowledgeGraphPreservesNodesAndEdges(t *testing.T) {

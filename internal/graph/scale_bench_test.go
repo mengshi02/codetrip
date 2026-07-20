@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	store "github.com/mengshi02/codetrip/internal/storage"
+	store "github.com/mengshi02/codetrip/internal/store"
 )
 
 // benchPerfGS creates a GraphStore for performance benchmarks.

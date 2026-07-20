@@ -13,7 +13,7 @@ import (
 	"github.com/coder/hnsw"
 	"github.com/mengshi02/codetrip/internal/graph"
 	"github.com/mengshi02/codetrip/internal/search/symbol"
-	store "github.com/mengshi02/codetrip/internal/storage"
+	store "github.com/mengshi02/codetrip/internal/store"
 	"github.com/mengshi02/codetrip/internal/util"
 )
 

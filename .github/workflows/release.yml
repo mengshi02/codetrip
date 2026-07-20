@@ -60,6 +60,13 @@ jobs:
           OUTPUT: bin/codetrip-${{ matrix.goos }}-${{ matrix.goarch }}${{ matrix.extension }}
         run: make release-build
 
+      - name: Test Windows backend
+        if: runner.os == 'Windows'
+        shell: bash
+        env:
+          CGO_ENABLED: "1"
+        run: go test ./...
+
       - name: Verify embedded version
         if: runner.os != 'Windows'
         shell: bash

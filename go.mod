@@ -107,6 +107,6 @@ require (
 	google.golang.org/protobuf v1.36.11 // indirect
 )
 
-replace github.com/coder/hnsw v0.6.1 => ./third_party/semantic-index
+replace github.com/coder/hnsw v0.6.1 => ./third_party/hnsw
 
 replace github.com/alex-pinkus/tree-sitter-swift => ./third_party/tree-sitter-swift

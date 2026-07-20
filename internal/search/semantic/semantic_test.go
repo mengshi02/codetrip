@@ -8,7 +8,7 @@ import (
 	"path/filepath"
 
 	"github.com/mengshi02/codetrip/internal/graph"
-	store "github.com/mengshi02/codetrip/internal/storage"
+	store "github.com/mengshi02/codetrip/internal/store"
 )
 
 // vectorMockEmbedder 模拟嵌入模型

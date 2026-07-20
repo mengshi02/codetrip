@@ -59,6 +59,12 @@ macOS, and Windows runners and require no third-party runtime installation.
 `make build-all` dispatches that GitHub Actions matrix; use `gh run watch` and
 `gh run download` to follow it and retrieve the archives.
 
+Source search uses the native high-throughput backend on Linux and macOS. The
+Windows build uses a portable full-text backend with exact line verification;
+it preserves literal/regular-expression search, file and language filters, and
+context lines, but is slower on large repositories. Source indexes must be
+rebuilt when moving a data directory between these platform families.
+
 ## CLI quick start
 
 ```bash

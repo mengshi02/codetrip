@@ -6,7 +6,7 @@ import (
 	"testing"
 
 	"github.com/mengshi02/codetrip/internal/graph"
-	store "github.com/mengshi02/codetrip/internal/storage"
+	store "github.com/mengshi02/codetrip/internal/store"
 )
 
 // TestRunDualModal_Basic verifies that RunDualModal embeds nodes using

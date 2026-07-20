@@ -56,6 +56,8 @@ codetrip source 'lang:go file:config ParseConfig' --repo project --context 2
 
 `search` 面向符号和元数据；`source` 面向文件名及源码内容，支持文本、正则、文件和语言过滤。
 
+Linux 和 macOS 使用原生高吞吐源码检索后端。Windows 使用便携全文检索后端召回文件，再执行精确行匹配；公共 API 和查询能力保持一致，但在大型仓库上的源码搜索速度会更慢。Windows 与 Linux/macOS 的源码索引格式不同，跨平台迁移数据目录后需要重新构建仓库快照。
+
 ### 语义与混合检索
 
 ```bash
