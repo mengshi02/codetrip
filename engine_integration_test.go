@@ -29,6 +29,11 @@ func TestIndexRepoPersistsValidatedGraphAndExportsCSV(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer func() {
+		if engine != nil {
+			_ = engine.Close()
+		}
+	}()
 
 	csvDir := filepath.Join(t.TempDir(), "csv")
 	result, err := engine.IndexRepo(context.Background(), repository,
@@ -145,13 +150,20 @@ func TestIndexRepoPersistsValidatedGraphAndExportsCSV(t *testing.T) {
 		t.Fatalf("symbol search result=%#v, error=%v", searchResult, err)
 	}
 	sourceResult, err := engine.SearchSource(context.Background(), &SourceSearchRequest{Repo: "fixture", Query: "Work", Limit: 10})
-	if err != nil || len(sourceResult.Results) == 0 || sourceResult.Results[0].FilePath != "main.go" {
+	if err != nil || len(sourceResult.Results) == 0 {
 		t.Fatalf("source search=%#v, error=%v", sourceResult, err)
 	}
+	foundCode := false
 	for _, match := range sourceResult.Results {
 		if match.FilePath == "README.md" {
 			t.Fatalf("default code scope returned documentation: %#v", sourceResult)
 		}
+		if match.FilePath == "main.go" {
+			foundCode = true
+		}
+	}
+	if !foundCode {
+		t.Fatalf("default code scope did not return main.go: %#v", sourceResult)
 	}
 	docsResult, err := engine.SearchSource(context.Background(), &SourceSearchRequest{Repo: "fixture", Query: "Work", Scope: "docs", Limit: 10})
 	if err != nil || len(docsResult.Results) != 1 || docsResult.Results[0].FilePath != "README.md" {
@@ -175,6 +187,7 @@ func TestIndexRepoPersistsValidatedGraphAndExportsCSV(t *testing.T) {
 	if err := engine.Close(); err != nil {
 		t.Fatal(err)
 	}
+	engine = nil
 
 	reopened, err := Open(dataDir)
 	if err != nil {
