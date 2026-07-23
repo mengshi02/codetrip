@@ -7,11 +7,13 @@ require (
 	github.com/blugelabs/bluge v0.2.2
 	github.com/cockroachdb/pebble/v2 v2.1.6
 	github.com/coder/hnsw v0.6.1
+	github.com/go-enry/go-enry/v2 v2.9.6
 	github.com/hashicorp/golang-lru/v2 v2.0.7
 	github.com/modelcontextprotocol/go-sdk v1.6.1
 	github.com/sourcegraph/zoekt v0.0.0-20260716100610-b2738987fa42
 	github.com/spf13/cobra v1.10.2
 	github.com/vmihailenco/msgpack/v5 v5.4.1
+	golang.org/x/tools v0.43.0
 )
 
 require (
@@ -35,7 +37,6 @@ require (
 	github.com/cockroachdb/swiss v0.0.0-20251224182025-b0f6560f979b // indirect
 	github.com/dgryski/go-metro v0.0.0-20180109044635-280f6062b5bc // indirect
 	github.com/dustin/go-humanize v1.0.1 // indirect
-	github.com/go-enry/go-enry/v2 v2.9.6 // indirect
 	github.com/go-enry/go-oniguruma v1.2.1 // indirect
 	github.com/google/jsonschema-go v0.4.3 // indirect
 	github.com/google/renameio v1.0.1 // indirect
@@ -60,6 +61,7 @@ require (
 	github.com/wasilibs/wazero-helpers v0.0.0-20240620070341-3dff1577cd52 // indirect
 	github.com/yosida95/uritemplate/v3 v3.0.2 // indirect
 	go.uber.org/atomic v1.11.0 // indirect
+	golang.org/x/mod v0.34.0 // indirect
 	golang.org/x/net v0.53.0 // indirect
 	golang.org/x/oauth2 v0.35.0 // indirect
 	golang.org/x/sync v0.21.0 // indirect
@@ -98,7 +100,6 @@ require (
 	github.com/tree-sitter/tree-sitter-javascript v0.23.1
 	github.com/tree-sitter/tree-sitter-php v0.23.11
 	github.com/tree-sitter/tree-sitter-python v0.23.6
-	github.com/tree-sitter/tree-sitter-ruby v0.23.1
 	github.com/tree-sitter/tree-sitter-rust v0.23.2
 	github.com/tree-sitter/tree-sitter-typescript v0.23.2
 	golang.org/x/exp v0.0.0-20240506185415-9bf2ced13842 // indirect

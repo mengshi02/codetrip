@@ -19,11 +19,12 @@ import (
 )
 
 const (
-	portableSchemaVersion = 1
+	portableSchemaVersion = 2
 	portableBatchSize     = 256
 	portableManifestName  = "format.json"
 	fieldPath             = "path"
 	fieldLanguage         = "language"
+	fieldKind             = "kind"
 	fieldContent          = "content"
 )
 
@@ -70,7 +71,7 @@ func (idx *portableIndex) Build(repositoryPath, _ string) error {
 			return walkErr
 		}
 		if entry.IsDir() {
-			if path != repositoryPath && (entry.Name() == ".git" || entry.Name() == ".codetrip") {
+			if path != repositoryPath && shouldSkipDirectory(entry.Name()) {
 				return filepath.SkipDir
 			}
 			return nil
@@ -85,6 +86,10 @@ func (idx *portableIndex) Build(repositoryPath, _ string) error {
 		if bytes.IndexByte(content, 0) >= 0 || !utf8.Valid(content) {
 			return nil
 		}
+		kind := ClassifyFile(path, content)
+		if kind == "" {
+			return nil
+		}
 		relative, err := filepath.Rel(repositoryPath, path)
 		if err != nil {
 			return err
@@ -94,6 +99,7 @@ func (idx *portableIndex) Build(repositoryPath, _ string) error {
 		document := bluge.NewDocument(relative)
 		document.AddField(bluge.NewKeywordField(fieldPath, relative).StoreValue())
 		document.AddField(bluge.NewKeywordField(fieldLanguage, language).StoreValue())
+		document.AddField(bluge.NewKeywordField(fieldKind, string(kind)).StoreValue())
 		document.AddField(bluge.NewTextField(fieldContent, string(content)).StoreValue())
 		batch.Update(document.ID(), document)
 		batchCount++
@@ -204,7 +210,7 @@ func parsePortableQuery(input string) (portableQuery, error) {
 	return query, nil
 }
 
-func (idx *portableIndex) Search(ctx context.Context, queryText string, limit, contextLines int) ([]Match, error) {
+func (idx *portableIndex) Search(ctx context.Context, queryText string, scope Scope, limit, contextLines int) ([]Match, error) {
 	query, err := parsePortableQuery(queryText)
 	if err != nil {
 		return nil, err
@@ -248,7 +254,7 @@ func (idx *portableIndex) Search(ctx context.Context, queryText string, limit, c
 		if document == nil {
 			break
 		}
-		var path, language, content string
+		var path, language, content, kind string
 		if err := document.VisitStoredFields(func(field string, value []byte) bool {
 			switch field {
 			case fieldPath:
@@ -257,12 +263,17 @@ func (idx *portableIndex) Search(ctx context.Context, queryText string, limit, c
 				language = string(value)
 			case fieldContent:
 				content = string(value)
+			case fieldKind:
+				kind = string(value)
 			}
 			return true
 		}); err != nil {
 			return nil, err
 		}
 		if query.filePattern != nil && !query.filePattern.MatchString(path) {
+			continue
+		}
+		if !kindMatchesScope(FileKind(kind), scope) {
 			continue
 		}
 		results = append(results, matchPortableLines(path, language, content, query, contextLines, limit-len(results))...)

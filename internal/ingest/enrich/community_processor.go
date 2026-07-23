@@ -408,13 +408,23 @@ func ProcessCommunities(kg *graph.KnowledgeGraph) CommunityDetectionResult {
 
 	// Create community nodes
 	communityNodes := createCommunityNodes(communities, result.count, lg, kg)
+	materializedCommunities := make(map[string]struct{}, len(communityNodes))
+	for _, community := range communityNodes {
+		materializedCommunities[community.ID] = struct{}{}
+	}
 
-	// Create membership mappings
+	// Create membership mappings only for materialized communities. Singleton
+	// communities are intentionally omitted above and must not leave dangling
+	// MEMBER_OF relationships behind.
 	var memberships []CommunityMembership
 	for nodeID, commNum := range communities {
+		communityID := fmt.Sprintf("comm_%d", commNum)
+		if _, ok := materializedCommunities[communityID]; !ok {
+			continue
+		}
 		memberships = append(memberships, CommunityMembership{
 			NodeID:      nodeID,
-			CommunityID: fmt.Sprintf("comm_%d", commNum),
+			CommunityID: communityID,
 		})
 	}
 
@@ -422,7 +432,7 @@ func ProcessCommunities(kg *graph.KnowledgeGraph) CommunityDetectionResult {
 		Communities: communityNodes,
 		Memberships: memberships,
 		Stats: CommunityStats{
-			TotalCommunities: result.count,
+			TotalCommunities: len(communityNodes),
 			Modularity:       result.modularity,
 			NodesProcessed:   len(lg.nodes),
 		},
@@ -505,6 +515,12 @@ func ApplyCommunitiesToGraph(kg *graph.KnowledgeGraph, result CommunityDetection
 
 	// Add MEMBER_OF relationships
 	for _, membership := range result.Memberships {
+		if _, sourceExists := kg.GetNode(membership.NodeID); !sourceExists {
+			continue
+		}
+		if _, communityExists := kg.GetNode(membership.CommunityID); !communityExists {
+			continue
+		}
 		relID := graph.GenerateID("MEMBER_OF", membership.NodeID+"->"+membership.CommunityID)
 		kg.AddRelationship(&graph.GraphRelationship{
 			ID:         relID,

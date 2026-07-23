@@ -44,12 +44,26 @@ func newRootCmd(flags *cliFlags) *cobra.Command {
 	}
 	root.PersistentFlags().StringVar(&flags.tripDir, "dir", "", "data directory (default: ~/.codetrip)")
 	root.PersistentFlags().BoolVarP(&flags.verbose, "verbose", "v", false, "enable info logging")
-	root.AddCommand(newIndexCmd(flags), newSearchCmd(flags), newSourceCmd(flags), newEmbedCmd(flags), newHybridCmd(flags), newTraverseCmd(flags), newPathCmd(flags), newExportCmd(flags), newListCmd(flags), newMCPCmd(flags), newVersionCmd())
+	root.AddCommand(newIndexCmd(flags), newDeleteCmd(flags), newSearchCmd(flags), newSourceCmd(flags), newEmbedCmd(flags), newHybridCmd(flags), newTraverseCmd(flags), newPathCmd(flags), newContextCmd(flags), newImpactCmd(flags), newCheckCmd(flags), newDiffCmd(flags), newRenameCmd(flags), newExportCmd(flags), newListCmd(flags), newMCPCmd(flags), newVersionCmd())
 	return root
 }
 
+func newDeleteCmd(flags *cliFlags) *cobra.Command {
+	return &cobra.Command{
+		Use: "delete <repo>", Short: "Delete an indexed repository and all of its data", Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			trip, err := flags.openTrip()
+			if err != nil {
+				return err
+			}
+			defer trip.Close()
+			return trip.DeleteRepo(cmd.Context(), args[0])
+		},
+	}
+}
+
 func newSourceCmd(flags *cliFlags) *cobra.Command {
-	var repo string
+	var repo, scope string
 	var limit, contextLines int
 	command := &cobra.Command{
 		Use: "source <query>", Short: "Search file names and source contents", Args: cobra.ExactArgs(1),
@@ -59,7 +73,7 @@ func newSourceCmd(flags *cliFlags) *cobra.Command {
 				return err
 			}
 			defer trip.Close()
-			result, err := trip.SearchSource(cmd.Context(), &codetrip.SourceSearchRequest{Repo: repo, Query: args[0], Limit: limit, ContextLines: contextLines})
+			result, err := trip.SearchSource(cmd.Context(), &codetrip.SourceSearchRequest{Repo: repo, Query: args[0], Scope: codetrip.SourceScope(scope), Limit: limit, ContextLines: contextLines})
 			if err != nil {
 				return err
 			}
@@ -69,6 +83,7 @@ func newSourceCmd(flags *cliFlags) *cobra.Command {
 		},
 	}
 	command.Flags().StringVar(&repo, "repo", "", "repository name")
+	command.Flags().StringVar(&scope, "scope", "code", "search scope: code, docs, or all")
 	command.Flags().IntVar(&limit, "limit", 20, "maximum matches")
 	command.Flags().IntVar(&contextLines, "context", 1, "context lines before and after each match")
 	_ = command.MarkFlagRequired("repo")
@@ -181,6 +196,170 @@ func newPathCmd(flags *cliFlags) *cobra.Command {
 	return command
 }
 
+func newContextCmd(flags *cliFlags) *cobra.Command {
+	var repo, relations string
+	var limit int
+	command := &cobra.Command{
+		Use: "context <node-id>", Short: "Explain a symbol and its direct semantic neighborhood", Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			trip, err := flags.openTrip()
+			if err != nil {
+				return err
+			}
+			defer trip.Close()
+			result, err := trip.Context(cmd.Context(), &codetrip.ContextRequest{
+				Repo: repo, NodeID: args[0], RelationTypes: splitRelations(relations), Limit: limit,
+			})
+			if err != nil {
+				return err
+			}
+			encoded, _ := json.MarshalIndent(result, "", "  ")
+			fmt.Fprintln(cmd.OutOrStdout(), string(encoded))
+			return nil
+		},
+	}
+	command.Flags().StringVar(&repo, "repo", "", "repository name")
+	command.Flags().StringVar(&relations, "relations", "", "comma-separated relationship types")
+	command.Flags().IntVar(&limit, "limit", 100, "maximum direct relationships")
+	_ = command.MarkFlagRequired("repo")
+	return command
+}
+
+func newImpactCmd(flags *cliFlags) *cobra.Command {
+	var repo, relations string
+	var depth, limit int
+	command := &cobra.Command{
+		Use: "impact <node-id>", Short: "Analyze symbols affected by changing a graph node", Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			trip, err := flags.openTrip()
+			if err != nil {
+				return err
+			}
+			defer trip.Close()
+			result, err := trip.Impact(cmd.Context(), &codetrip.ImpactRequest{
+				Repo: repo, NodeID: args[0], MaxDepth: depth,
+				RelationTypes: splitRelations(relations), Limit: limit,
+			})
+			if err != nil {
+				return err
+			}
+			encoded, _ := json.MarshalIndent(result, "", "  ")
+			fmt.Fprintln(cmd.OutOrStdout(), string(encoded))
+			return nil
+		},
+	}
+	command.Flags().StringVar(&repo, "repo", "", "repository name")
+	command.Flags().IntVar(&depth, "depth", 3, "maximum reverse dependency depth")
+	command.Flags().StringVar(&relations, "relations", "", "comma-separated relationship types")
+	command.Flags().IntVar(&limit, "limit", 100, "maximum impacted symbols")
+	_ = command.MarkFlagRequired("repo")
+	return command
+}
+
+func newCheckCmd(flags *cliFlags) *cobra.Command {
+	var repo, checks string
+	var confidence float64
+	var limit int
+	command := &cobra.Command{
+		Use: "check", Short: "Check graph integrity and repository structure", Args: cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			trip, err := flags.openTrip()
+			if err != nil {
+				return err
+			}
+			defer trip.Close()
+			result, err := trip.Check(cmd.Context(), &codetrip.CheckRequest{
+				Repo: repo, Checks: splitRelations(checks),
+				MinConfidence: confidence, Limit: limit,
+			})
+			if err != nil {
+				return err
+			}
+			encoded, _ := json.MarshalIndent(result, "", "  ")
+			fmt.Fprintln(cmd.OutOrStdout(), string(encoded))
+			return nil
+		},
+	}
+	command.Flags().StringVar(&repo, "repo", "", "repository name")
+	command.Flags().StringVar(&checks, "checks", "", "comma-separated checks: integrity, cycles, confidence")
+	command.Flags().Float64Var(&confidence, "confidence", 0.7, "minimum edge confidence for the confidence check")
+	command.Flags().IntVar(&limit, "limit", 100, "maximum findings")
+	_ = command.MarkFlagRequired("repo")
+	return command
+}
+
+func newDiffCmd(flags *cliFlags) *cobra.Command {
+	var repo, target string
+	var depth, limit int
+	var noImpact bool
+	command := &cobra.Command{
+		Use: "diff [base-ref]", Short: "Map Git changes to symbols and affected code", Args: cobra.MaximumNArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			base := "HEAD"
+			if len(args) == 1 {
+				base = args[0]
+			}
+			trip, err := flags.openTrip()
+			if err != nil {
+				return err
+			}
+			defer trip.Close()
+			result, err := trip.Diff(cmd.Context(), &codetrip.DiffRequest{
+				Repo: repo, BaseRef: base, TargetRef: target,
+				MaxDepth: depth, Limit: limit, SkipImpact: noImpact,
+			})
+			if err != nil {
+				return err
+			}
+			encoded, _ := json.MarshalIndent(result, "", "  ")
+			fmt.Fprintln(cmd.OutOrStdout(), string(encoded))
+			return nil
+		},
+	}
+	command.Flags().StringVar(&repo, "repo", "", "repository name")
+	command.Flags().StringVar(&target, "target", "", "target Git ref (default: working tree)")
+	command.Flags().IntVar(&depth, "depth", 3, "maximum impact depth")
+	command.Flags().IntVar(&limit, "limit", 100, "maximum changed and impacted symbols")
+	command.Flags().BoolVar(&noImpact, "no-impact", false, "map changed symbols without impact expansion")
+	_ = command.MarkFlagRequired("repo")
+	return command
+}
+
+func newRenameCmd(flags *cliFlags) *cobra.Command {
+	var repo string
+	var limit int
+	command := &cobra.Command{
+		Use: "rename <node-id> <new-name>", Short: "Plan a safe symbol rename without modifying source", Args: cobra.ExactArgs(2),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			trip, err := flags.openTrip()
+			if err != nil {
+				return err
+			}
+			defer trip.Close()
+			result, err := trip.Rename(cmd.Context(), &codetrip.RenameRequest{
+				Repo: repo, NodeID: args[0], NewName: args[1], Limit: limit,
+			})
+			if err != nil {
+				return err
+			}
+			encoded, _ := json.MarshalIndent(result, "", "  ")
+			fmt.Fprintln(cmd.OutOrStdout(), string(encoded))
+			return nil
+		},
+	}
+	command.Flags().StringVar(&repo, "repo", "", "repository name")
+	command.Flags().IntVar(&limit, "limit", 200, "maximum source occurrences")
+	_ = command.MarkFlagRequired("repo")
+	return command
+}
+
+func splitRelations(relations string) []string {
+	if strings.TrimSpace(relations) == "" {
+		return nil
+	}
+	return strings.Split(relations, ",")
+}
+
 func newTraverseCmd(flags *cliFlags) *cobra.Command {
 	var repo, direction, relations string
 	var depth int
@@ -192,13 +371,9 @@ func newTraverseCmd(flags *cliFlags) *cobra.Command {
 				return err
 			}
 			defer trip.Close()
-			var relationTypes []string
-			if relations != "" {
-				relationTypes = strings.Split(relations, ",")
-			}
 			result, err := trip.Traverse(cmd.Context(), &codetrip.TraverseRequest{
 				Repo: repo, StartNodeID: args[0], Direction: codetrip.TraverseDirection(direction),
-				MaxDepth: depth, RelationTypes: relationTypes,
+				MaxDepth: depth, RelationTypes: splitRelations(relations),
 			})
 			if err != nil {
 				return err

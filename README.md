@@ -13,21 +13,21 @@ Codetrip turns a source repository into a typed code graph and combines graph tr
 | .go  .ts  .py      | --> | Parse + Language Resolution  | --> | Symbol Search          |
 | .rs  .java  ...    |     |             |                |     | Source Search          |
 |                    |     |             v                |     | Graph Context          |
-| Repository         |     |      Typed Code Graph        |     | Dependency Exploration |
-|                    |     |             |                |     | Bounded BFS            |
-|                    |     |   +---------+---------+      |     | Shortest Path          |
-|                    |     |   |         |         |      |     | Hybrid Retrieval       |
-|                    |     | Symbol    Source   Semantic  |     | Agent Context          |
-|                    |     | Index     Index    Vectors   |     |                        |
-|                    |     |   +---------+---------+      |     |                        |
+| Repository         |     |      Typed Code Graph        |     | Impact Analysis        |
+|                    |     |             |                |     | Structural Checks      |
+|                    |     |   +---------+---------+      |     | Change Analysis        |
+|                    |     |   |         |         |      |     | Rename Planning        |
+|                    |     | Symbol    Source   Semantic  |     | Graph Traversal        |
+|                    |     | Index     Index    Vectors   |     | Shortest Path          |
+|                    |     |   +---------+---------+      |     | Hybrid Retrieval       |
 |                    |     |             |                |     |                        |
-|                    |     |     Atomic Snapshot          |     |                        |
+|                    |     |     Atomic Snapshot          |     | Agent Context          |
 |                    |     |             |                |     |                        |
 |                    |     |      Go LIB / CLI / MCP      |     |                        |
 +--------------------+     +------------------------------+     +------------------------+
 ```
 
-Each repository is published as an atomic snapshot. The durable graph is authoritative; search indexes and vectors are repository-scoped derived data.
+Each repository owns an independent storage directory and is published as an atomic snapshot. The durable graph is authoritative; search indexes and vectors are repository-scoped derived data. Repository databases open lazily, so operations on one project do not lock unrelated projects.
 
 ## Quick Start
 
@@ -51,11 +51,20 @@ codetrip index /path/to/project --repo project
 
 codetrip search "ParseConfig" --repo project
 codetrip source 'lang:go ParseConfig' --repo project
+codetrip source 'architecture' --repo project --scope docs
+
+# Remove the repository and every persisted snapshot.
+codetrip delete project
 ```
 
 ### Explore the Graph
 
 ```bash
+codetrip context NODE_ID --repo project
+codetrip impact NODE_ID --repo project --depth 3
+codetrip check --repo project
+codetrip diff HEAD~1 --target HEAD --repo project
+codetrip rename NODE_ID NewName --repo project
 codetrip traverse NODE_ID --repo project --direction both --depth 3
 codetrip path SOURCE_ID TARGET_ID --repo project
 ```
@@ -77,8 +86,12 @@ codetrip hybrid "configuration loading" --repo project \
 | Capability | Description |
 |---|---|
 | **Code Graph** | Typed files, symbols, calls, imports, inheritance, overrides, communities, and processes |
-| **Multi-language Parsing** | Go, TypeScript/TSX, JavaScript/JSX, Python, Java, C, C++, C#, Rust, Ruby, PHP, Swift, and Kotlin |
+| **Multi-language Parsing** | Go, TypeScript/TSX, JavaScript/JSX, Python, Java, C, C++, C#, Rust, PHP, Swift, and Kotlin |
 | **Graph Navigation** | Bounded BFS and shortest directed paths over typed relationships |
+| **Agent Intelligence** | Noise-filtered symbol context and bounded reverse impact analysis |
+| **Structural Checks** | Graph integrity, invalid self-dependencies, inheritance cycles, import cycles, and optional confidence review |
+| **Change Intelligence** | Git changed-line mapping to persisted symbols with aggregated reverse impact |
+| **Rename Planning** | Non-mutating conflict detection, semantic references, and exact source candidates |
 | **Symbol Search** | Repository-scoped lexical search over symbols and metadata |
 | **Source Search** | File-name and source-content search with literal, regex, file, and language filters |
 | **Semantic Retrieval** | HTTP embeddings, persisted vectors, optional int8 quantization, and hybrid rank fusion |
@@ -102,9 +115,29 @@ _, err = engine.IndexRepo(ctx, "/path/to/project",
 result, err := engine.Search(ctx, &codetrip.SearchRequest{
     Repo: "project", Query: "ParseConfig", Limit: 20,
 })
+
+context, err := engine.Context(ctx, &codetrip.ContextRequest{
+    Repo: "project", NodeID: nodeID,
+})
+
+impact, err := engine.Impact(ctx, &codetrip.ImpactRequest{
+    Repo: "project", NodeID: nodeID, MaxDepth: 3,
+})
+
+checks, err := engine.Check(ctx, &codetrip.CheckRequest{
+    Repo: "project",
+})
+
+changes, err := engine.Diff(ctx, &codetrip.DiffRequest{
+    Repo: "project", BaseRef: "HEAD~1", TargetRef: "HEAD",
+})
+
+rename, err := engine.Rename(ctx, &codetrip.RenameRequest{
+    Repo: "project", NodeID: nodeID, NewName: "LoadConfig",
+})
 ```
 
-The public API also provides source search, embedding, hybrid search, traversal, shortest paths, repository listing, CSV export, metrics, and configuration options.
+The public API also provides source search, embedding, hybrid search, context, impact analysis, traversal, shortest paths, repository listing, CSV export, metrics, and configuration options.
 
 ## MCP
 
@@ -115,7 +148,7 @@ codetrip mcp --dir ~/.codetrip
 The stdio server exposes the same core names as the CLI:
 
 ```text
-list  search  source  traverse  path
+list  search  source  context  impact  check  diff  rename  traverse  path
 ```
 
 ## CSV Inspection

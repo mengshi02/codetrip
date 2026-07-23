@@ -104,6 +104,7 @@ func (m *adjValueMerger) Finish(includesBase bool) ([]byte, io.Closer, error) {
 // adjEntryForMerge mirrors graph.AdjEntry to avoid circular import.
 // Must be kept in sync with graph.AdjEntry.
 type adjEntryForMerge struct {
+	ID     string            `msgpack:"id,omitempty" json:"id,omitempty"`
 	Target string            `msgpack:"target" json:"target"`
 	Props  edgePropsForMerge `msgpack:"props,omitempty" json:"props,omitempty"`
 }

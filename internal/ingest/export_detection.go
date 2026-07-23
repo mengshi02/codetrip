@@ -32,8 +32,6 @@ func IsNodeExported(node *sitter.Node, name string, language string, source []by
 		return phpExportChecker(node, name, source)
 	case "swift":
 		return swiftExportChecker(node, name, source)
-	case "ruby":
-		return true // Ruby: all methods are public by default
 	default:
 		return false
 	}

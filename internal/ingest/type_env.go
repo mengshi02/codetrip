@@ -1,6 +1,9 @@
 package ingest
 
 import (
+	"regexp"
+	"strings"
+
 	sitter "github.com/tree-sitter/go-tree-sitter"
 )
 
@@ -33,7 +36,94 @@ func LookupTypeEnv(env TypeEnv, varName string, callNode *sitter.Node, source []
 	}
 	// Fall back to file-level scope
 	if fileEnv, ok := env[fileScope]; ok {
-		return fileEnv[varName]
+		if result := fileEnv[varName]; result != "" {
+			return result
+		}
+	}
+	// Dynamic-language instance fields are commonly initialized in a constructor
+	// and consumed by sibling methods. Keep propagation class-local instead of
+	// treating every same-named field in the file as interchangeable.
+	pythonField := len(varName) > len("self.") && varName[:len("self.")] == "self."
+	jsField := len(varName) > len("this.") && varName[:len("this.")] == "this."
+	phpField := len(varName) > len("$this->") && varName[:len("$this->")] == "$this->"
+	if pythonField || jsField || phpField {
+		for current := callNode.Parent(); current != nil; current = current.Parent() {
+			if current.Kind() != "class_definition" && current.Kind() != "class_declaration" {
+				continue
+			}
+			var result string
+			var visit func(*sitter.Node)
+			visit = func(node *sitter.Node) {
+				if node == nil || result != "" {
+					return
+				}
+				if node != current && (node.Kind() == "class_definition" || node.Kind() == "class_declaration") {
+					return
+				}
+				if FunctionNodeTypes[node.Kind()] {
+					name, _ := ExtractFunctionName(node, source)
+					if name == "__init__" || name == "constructor" || name == "__construct" {
+						result = env[name+"@"+uintToStr(node.StartByte())][varName]
+					}
+					return
+				}
+				for i := uint(0); i < node.NamedChildCount(); i++ {
+					visit(node.NamedChild(i))
+				}
+			}
+			visit(current)
+			return result
+		}
+	}
+	return ""
+}
+
+// InferSwiftSelfType resolves Swift's contextual Self pseudo-type to the
+// enclosing nominal type or protocol.
+func InferSwiftSelfType(callNode *sitter.Node, source []byte) string {
+	for current := callNode.Parent(); current != nil; current = current.Parent() {
+		if current.Kind() != "class_declaration" && current.Kind() != "protocol_declaration" {
+			continue
+		}
+		name := current.ChildByFieldName("name")
+		if name == nil {
+			continue
+		}
+		if typeName := extractSimpleTypeName(name, source); typeName != "" {
+			return typeName
+		}
+	}
+	return ""
+}
+
+// InferSwiftGenericReceiverType returns the leading protocol/type constraint
+// for a generic receiver declared by the enclosing function. Swift permits
+// static dispatch through that generic name (for example T.log where
+// T: Real & FixedWidthFloatingPoint).
+func InferSwiftGenericReceiverType(callNode *sitter.Node, receiverName string, source []byte) string {
+	if receiverName == "" || receiverName == "Self" {
+		return ""
+	}
+	for current := callNode.Parent(); current != nil; current = current.Parent() {
+		if !FunctionNodeTypes[current.Kind()] {
+			continue
+		}
+		declaration := current.Utf8Text(source)
+		if body := strings.Index(declaration, "{"); body >= 0 {
+			declaration = declaration[:body]
+		}
+		name := regexp.QuoteMeta(receiverName)
+		patterns := []string{
+			`(?:<|,)\s*` + name + `\s*:\s*([A-Za-z_][A-Za-z0-9_]*)`,
+			`\bwhere\s+` + name + `\s*:\s*([A-Za-z_][A-Za-z0-9_]*)`,
+		}
+		for _, pattern := range patterns {
+			match := regexp.MustCompile(pattern).FindStringSubmatch(declaration)
+			if len(match) == 2 {
+				return match[1]
+			}
+		}
+		return ""
 	}
 	return ""
 }
@@ -136,12 +226,14 @@ func extractTypeBinding(node *sitter.Node, language string, env map[string]strin
 // ─────────────────────────────────────────────────────────────────────────────
 
 var TypedParameterTypes = map[string]bool{
-	"required_parameter":    true, // TS: (x: Foo)
-	"optional_parameter":    true, // TS: (x?: Foo)
-	"formal_parameter":      true, // Java/Kotlin
-	"parameter":             true, // C#/Rust/Go/Python/Swift
-	"parameter_declaration": true, // C/C++ void f(Type name)
-	"simple_parameter":      true, // PHP function(Foo $x)
+	"required_parameter":           true, // TS: (x: Foo)
+	"optional_parameter":           true, // TS: (x?: Foo)
+	"formal_parameter":             true, // Java/Kotlin
+	"parameter":                    true, // C#/Rust/Go/Python/Swift
+	"parameter_declaration":        true, // C/C++ void f(Type name)
+	"simple_parameter":             true, // PHP function(Foo $x)
+	"typed_parameter":              true, // Python def f(x: Foo)
+	"property_promotion_parameter": true, // PHP constructor property promotion
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -173,7 +265,7 @@ func extractSimpleTypeName(typeNode *sitter.Node, source []byte) string {
 	}
 
 	// Generic types: extract the base type (e.g., List<User> → List)
-	if kind == "generic_type" || kind == "parameterized_type" || kind == "template_type" {
+	if kind == "generic_type" || kind == "generic_name" || kind == "parameterized_type" || kind == "template_type" {
 		base := typeNode.ChildByFieldName("name")
 		if base == nil {
 			base = typeNode.ChildByFieldName("type")
@@ -233,7 +325,7 @@ func extractVarName(node *sitter.Node, source []byte) string {
 		return ""
 	}
 	kind := node.Kind()
-	if kind == "identifier" || kind == "field_identifier" || kind == "simple_identifier" || kind == "variable_name" || kind == "name" {
+	if kind == "identifier" || kind == "field_identifier" || kind == "property_identifier" || kind == "simple_identifier" || kind == "variable_name" || kind == "name" {
 		return node.Utf8Text(source)
 	}
 	// variable_declarator (Java/C#): has a 'name' field
@@ -299,7 +391,6 @@ var typeConfigs = map[string]*LanguageTypeConfig{
 	"c":          cCppTypeConfig,
 	"cpp":        cCppTypeConfig,
 	"php":        phpTypeConfig,
-	"ruby":       &noopTypeConfig,
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -308,14 +399,41 @@ var typeConfigs = map[string]*LanguageTypeConfig{
 
 var tsTypeConfig = &LanguageTypeConfig{
 	declarationNodeTypes: map[string]bool{
-		"lexical_declaration":  true,
-		"variable_declaration": true,
+		"lexical_declaration":     true,
+		"variable_declaration":    true,
+		"public_field_definition": true,
+		"assignment_expression":   true,
 	},
 	extractDeclaration: tsExtractDeclaration,
 	extractParameter:   tsExtractParameter,
 }
 
 func tsExtractDeclaration(node *sitter.Node, env map[string]string, source []byte) {
+	if node.Kind() == "assignment_expression" {
+		left := node.ChildByFieldName("left")
+		right := node.ChildByFieldName("right")
+		name := extractReceiverBinding(left, source)
+		var typeName string
+		if right != nil && right.Kind() == "new_expression" {
+			typeName = extractSimpleTypeName(right.ChildByFieldName("constructor"), source)
+		} else if right != nil && right.Kind() == "identifier" {
+			typeName = env[right.Utf8Text(source)]
+		}
+		if name != "" && typeName != "" {
+			env[name] = typeName
+		}
+		return
+	}
+	if node.Kind() == "public_field_definition" {
+		nameNode := node.ChildByFieldName("name")
+		typeNode := node.ChildByFieldName("type")
+		name := extractVarName(nameNode, source)
+		typeName := extractSimpleTypeName(typeNode, source)
+		if name != "" && typeName != "" {
+			env["this."+name] = typeName
+		}
+		return
+	}
 	for i := uint(0); i < node.NamedChildCount(); i++ {
 		declarator := node.NamedChild(i)
 		if declarator == nil || declarator.Kind() != "variable_declarator" {
@@ -323,11 +441,17 @@ func tsExtractDeclaration(node *sitter.Node, env map[string]string, source []byt
 		}
 		nameNode := declarator.ChildByFieldName("name")
 		typeAnnotation := declarator.ChildByFieldName("type")
-		if nameNode == nil || typeAnnotation == nil {
+		if nameNode == nil {
 			continue
 		}
 		varName := extractVarName(nameNode, source)
 		typeName := extractSimpleTypeName(typeAnnotation, source)
+		if typeName == "" {
+			value := declarator.ChildByFieldName("value")
+			if value != nil && value.Kind() == "new_expression" {
+				typeName = extractSimpleTypeName(value.ChildByFieldName("constructor"), source)
+			}
+		}
 		if varName != "" && typeName != "" {
 			env[varName] = typeName
 		}
@@ -746,20 +870,37 @@ func goExtractParameter(node *sitter.Node, env map[string]string, source []byte)
 
 var rustTypeConfig = &LanguageTypeConfig{
 	declarationNodeTypes: map[string]bool{
-		"let_declaration": true,
+		"let_declaration":   true,
+		"field_declaration": true,
 	},
 	extractDeclaration: rustExtractDeclaration,
 	extractParameter:   rustExtractParameter,
 }
 
 func rustExtractDeclaration(node *sitter.Node, env map[string]string, source []byte) {
+	if node.Kind() == "field_declaration" {
+		nameNode := node.ChildByFieldName("name")
+		typeNode := node.ChildByFieldName("type")
+		name := extractVarName(nameNode, source)
+		typeName := extractSimpleTypeName(typeNode, source)
+		if name != "" && typeName != "" {
+			env["self."+name] = typeName
+		}
+		return
+	}
 	pattern := node.ChildByFieldName("pattern")
 	typeNode := node.ChildByFieldName("type")
-	if pattern == nil || typeNode == nil {
+	if pattern == nil {
 		return
 	}
 	varName := extractVarName(pattern, source)
 	typeName := extractSimpleTypeName(typeNode, source)
+	if typeName == "" {
+		value := node.ChildByFieldName("value")
+		if value != nil && value.Kind() == "struct_expression" {
+			typeName = extractSimpleTypeName(value.ChildByFieldName("name"), source)
+		}
+	}
 	if varName != "" && typeName != "" {
 		env[varName] = typeName
 	}
@@ -802,11 +943,28 @@ var pythonTypeConfig = &LanguageTypeConfig{
 func pythonExtractDeclaration(node *sitter.Node, env map[string]string, source []byte) {
 	left := node.ChildByFieldName("left")
 	typeNode := node.ChildByFieldName("type")
-	if left == nil || typeNode == nil {
+	if left == nil {
 		return
 	}
 	varName := extractVarName(left, source)
-	typeName := extractSimpleTypeName(typeNode, source)
+	if varName == "" && left.Kind() == "attribute" {
+		varName = extractReceiverBinding(left, source)
+	}
+	var typeName string
+	if typeNode != nil {
+		typeName = extractSimpleTypeName(typeNode, source)
+	}
+	if typeName == "" {
+		right := node.ChildByFieldName("right")
+		if right != nil && right.Kind() == "call" {
+			function := right.ChildByFieldName("function")
+			if function != nil {
+				typeName = extractSimpleTypeName(function, source)
+			}
+		} else if right != nil && right.Kind() == "identifier" {
+			typeName = env[right.Utf8Text(source)]
+		}
+	}
 	if varName != "" && typeName != "" {
 		env[varName] = typeName
 	}
@@ -821,6 +979,9 @@ func pythonExtractParameter(node *sitter.Node, env map[string]string, source []b
 		nameNode = node.ChildByFieldName("name")
 		if nameNode == nil {
 			nameNode = node.ChildByFieldName("pattern")
+		}
+		if nameNode == nil && node.Kind() == "typed_parameter" && node.NamedChildCount() > 0 {
+			nameNode = node.NamedChild(0)
 		}
 		typeNode = node.ChildByFieldName("type")
 	}
@@ -1045,9 +1206,30 @@ func cCppExtractParameter(node *sitter.Node, env map[string]string, source []byt
 // ─────────────────────────────────────────────────────────────────────────────
 
 var phpTypeConfig = &LanguageTypeConfig{
-	declarationNodeTypes: map[string]bool{}, // PHP has no typed local variable declarations
-	extractDeclaration:   func(_ *sitter.Node, _ map[string]string, _ []byte) {},
+	declarationNodeTypes: map[string]bool{"assignment_expression": true},
+	extractDeclaration:   phpExtractDeclaration,
 	extractParameter:     phpExtractParameter,
+}
+
+func phpExtractDeclaration(node *sitter.Node, env map[string]string, source []byte) {
+	left := node.ChildByFieldName("left")
+	right := node.ChildByFieldName("right")
+	name := extractReceiverBinding(left, source)
+	if name == "" {
+		name = extractVarName(left, source)
+	}
+	var typeName string
+	if right != nil && right.Kind() == "object_creation_expression" {
+		typeName = extractSimpleTypeName(right.ChildByFieldName("type"), source)
+		if typeName == "" && right.NamedChildCount() > 0 {
+			typeName = extractSimpleTypeName(right.NamedChild(0), source)
+		}
+	} else if right != nil && right.Kind() == "variable_name" {
+		typeName = env[right.Utf8Text(source)]
+	}
+	if name != "" && typeName != "" {
+		env[name] = typeName
+	}
 }
 
 func phpExtractParameter(node *sitter.Node, env map[string]string, source []byte) {
@@ -1069,5 +1251,8 @@ func phpExtractParameter(node *sitter.Node, env map[string]string, source []byte
 	typeName := extractSimpleTypeName(typeNode, source)
 	if varName != "" && typeName != "" {
 		env[varName] = typeName
+		if (node.Kind() == "simple_parameter" || node.Kind() == "property_promotion_parameter") && findChildByTypeIn(node, "visibility_modifier") != nil {
+			env["$this->"+strings.TrimPrefix(varName, "$")] = typeName
+		}
 	}
 }

@@ -14,7 +14,10 @@ func TestSupportedLanguagesMatchesV140JavaScriptExtensions(t *testing.T) {
 			t.Fatalf("%s language = %q, want javascript", ext, SupportedLanguages[ext])
 		}
 	}
-	if SupportedLanguages[".tsx"] != "tsx" {
-		t.Fatalf(".tsx language = %q, want tsx", SupportedLanguages[".tsx"])
+	if SupportedLanguages[".tsx"] != "typescript" {
+		t.Fatalf(".tsx language = %q, want typescript", SupportedLanguages[".tsx"])
+	}
+	if ParserID(".tsx") != "tsx" {
+		t.Fatalf(".tsx parser = %q, want tsx", ParserID(".tsx"))
 	}
 }

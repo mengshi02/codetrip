@@ -40,6 +40,7 @@ var nodeSlicePool = sync.Pool{
 // AdjEntry represents an adjacency index entry (Scheme A: properties embedded in adjacency index value)
 // A single ScanPrefix retrieves complete edge data, no additional KV lookups needed
 type AdjEntry struct {
+	ID     string    `json:"id,omitempty" msgpack:"id,omitempty"`
 	Target string    `json:"target" msgpack:"target"`
 	Props  EdgeProps `json:"props,omitempty" msgpack:"props,omitempty"`
 }
@@ -519,12 +520,12 @@ func (s *GraphStore) AddEdge(edge *Edge) error {
 		}
 		// Outgoing edge adjacency index: adj:{repo}:{srcID}:out:{relType} → []AdjEntry
 		outAdjKey := adjKey(s.repo, edge.Source, "out", string(edge.Type))
-		if err := s.appendAdjEntry(b, outAdjKey, AdjEntry{Target: edge.Target, Props: edge.Props}); err != nil {
+		if err := s.appendAdjEntry(b, outAdjKey, AdjEntry{ID: edge.ID, Target: edge.Target, Props: edge.Props}); err != nil {
 			return err
 		}
 		// Incoming edge adjacency index: adj:{repo}:{tgtID}:in:{relType} → []AdjEntry
 		inAdjKey := adjKey(s.repo, edge.Target, "in", string(edge.Type))
-		if err := s.appendAdjEntry(b, inAdjKey, AdjEntry{Target: edge.Source, Props: edge.Props}); err != nil {
+		if err := s.appendAdjEntry(b, inAdjKey, AdjEntry{ID: edge.ID, Target: edge.Source, Props: edge.Props}); err != nil {
 			return err
 		}
 		// Invalidate adjacency caches for both source and target nodes
@@ -630,6 +631,14 @@ func (s *GraphStore) Batch(fn func(b *Batch) error) error {
 // If ctx is nil, context.Background() is used. The traversal is bounded by maxNodesVisited
 // (from traversalLimit) to prevent runaway queries on large graphs.
 func (s *GraphStore) BFS(ctx context.Context, startID string, direction TraverseDir, maxDepth int, filter EdgeFilter) ([]*Node, error) {
+	nodes, _, err := s.BFSWithEdges(ctx, startID, direction, maxDepth, filter)
+	return nodes, err
+}
+
+// BFSWithEdges returns the nodes discovered by BFS and the exact edge used to
+// discover each node. Returning discovery edges keeps the result bounded and
+// explains relation type and direction without emitting the full induced graph.
+func (s *GraphStore) BFSWithEdges(ctx context.Context, startID string, direction TraverseDir, maxDepth int, filter EdgeFilter) ([]*Node, []*Edge, error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -640,6 +649,7 @@ func (s *GraphStore) BFS(ctx context.Context, startID string, direction Traverse
 
 	visited := make(map[string]bool)
 	result := make([]*Node, 0)
+	traversed := make([]*Edge, 0)
 	queue := []bfsEntry{{id: startID, depth: 0}}
 	visited[startID] = true
 	nodesVisited := 0
@@ -649,13 +659,13 @@ func (s *GraphStore) BFS(ctx context.Context, startID string, direction Traverse
 		if nodesVisited%1000 == 0 {
 			select {
 			case <-ctx.Done():
-				return result, ctx.Err()
+				return result, traversed, ctx.Err()
 			default:
 			}
 		}
 		// Traversal limit check
 		if nodesVisited >= maxNodes {
-			return result, ErrTraversalLimitExceeded
+			return result, traversed, ErrTraversalLimitExceeded
 		}
 
 		entry := queue[0]
@@ -696,12 +706,13 @@ func (s *GraphStore) BFS(ctx context.Context, startID string, direction Traverse
 				continue
 			}
 			result = append(result, node)
+			traversed = append(traversed, edge)
 			queue = append(queue, bfsEntry{id: nextID, depth: entry.depth + 1})
 			nodesVisited++
 		}
 	}
 
-	return result, nil
+	return result, traversed, nil
 }
 
 type bfsEntry struct {
@@ -1083,6 +1094,7 @@ func (s *GraphStore) GetAllOutEdges(nodeID string) ([]*Edge, error) {
 
 		for _, entry := range entries {
 			edges = append(edges, &Edge{
+				ID:     entry.ID,
 				Type:   RelType(relTypeStr),
 				Source: nodeID,
 				Target: entry.Target,
@@ -1117,6 +1129,7 @@ func (s *GraphStore) ScanAllOutEdgesByRelType(relType string) ([]*Edge, error) {
 		}
 		for _, entry := range entries {
 			edges = append(edges, &Edge{
+				ID:     entry.ID,
 				Type:   RelType(relType),
 				Source: nodeID,
 				Target: entry.Target,
@@ -1150,6 +1163,7 @@ func (s *GraphStore) GetAllInEdges(nodeID string) ([]*Edge, error) {
 
 		for _, entry := range entries {
 			edges = append(edges, &Edge{
+				ID:     entry.ID,
 				Type:   RelType(relTypeStr),
 				Source: entry.Target,
 				Target: nodeID,
@@ -1372,11 +1386,11 @@ func (b *Batch) AddEdge(edge *Edge) error {
 
 	// Buffer outgoing adjacency entry
 	outKey := adjKey(b.graphStore.repo, edge.Source, "out", string(edge.Type))
-	b.adjBuffer[outKey] = append(b.adjBuffer[outKey], AdjEntry{Target: edge.Target, Props: edge.Props})
+	b.adjBuffer[outKey] = append(b.adjBuffer[outKey], AdjEntry{ID: edge.ID, Target: edge.Target, Props: edge.Props})
 
 	// Buffer incoming adjacency entry
 	inKey := adjKey(b.graphStore.repo, edge.Target, "in", string(edge.Type))
-	b.adjBuffer[inKey] = append(b.adjBuffer[inKey], AdjEntry{Target: edge.Source, Props: edge.Props})
+	b.adjBuffer[inKey] = append(b.adjBuffer[inKey], AdjEntry{ID: edge.ID, Target: edge.Source, Props: edge.Props})
 
 	return nil
 }

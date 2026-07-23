@@ -33,4 +33,4 @@ go.work.sum
 
 .jo*
 bin
-validation
+.validation

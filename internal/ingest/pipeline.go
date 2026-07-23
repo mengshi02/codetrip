@@ -124,7 +124,7 @@ func (p *Pipeline) Run() (*PipelineResult, error) {
 		if f.LanguageID == "" {
 			continue
 		}
-		if !registry.HasBinding(f.LanguageID) {
+		if !registry.HasParser(f.ParserID) {
 			continue
 		}
 		content, err := ReadFileContents(f.AbsolutePath, f.Size)
@@ -161,8 +161,8 @@ func (p *Pipeline) Run() (*PipelineResult, error) {
 		captures := make([]ImportQueryCapture, len(extracted.Imports))
 		for i, imp := range extracted.Imports {
 			importPath := cleanImportPath(imp.ImportPath)
-			namedBinding := ""
-			exportedName := ""
+			namedBinding := imp.NamedBinding
+			exportedName := imp.ExportedName
 			if imp.Language == "kotlin" && !strings.HasSuffix(importPath, ".*") {
 				namedBinding = importPath
 				if idx := strings.LastIndex(namedBinding, "."); idx >= 0 {
@@ -185,6 +185,7 @@ func (p *Pipeline) Run() (*PipelineResult, error) {
 		ProcessImports(kg, registry, pathsFromInputs(fileInputs), langMap,
 			nil, nil, nil, importMap, packageMap, namedImportMap, result.LangConfigs, resolveCtx)
 	}
+	PopulateImplicitPackageVisibility(fileInputs, importMap)
 
 	// Go same-package implicit visibility: files in the same directory are mutually
 	// visible without explicit import. Add them to packageMap so Tier 2b can resolve.
@@ -203,6 +204,19 @@ func (p *Pipeline) Run() (*PipelineResult, error) {
 		ProcessCallsFromExtracted(kg, extracted.Calls, symbolTable, importMap, packageMap, namedImportMap, importOrderMap, assignableOwners)
 		ProcessHeritageFromExtracted(kg, extracted.Heritage, symbolTable, importMap, packageMap, namedImportMap, importOrderMap)
 		ProcessRoutesFromExtracted(kg, extracted.Routes, symbolTable, importMap, packageMap)
+	}
+
+	semanticStats, semanticErrors := ProcessSemanticRefinements(p.RepoPath, kg)
+	for _, semanticErr := range semanticErrors {
+		log.Printf("[pipeline] Semantic refinement skipped: %v", semanticErr)
+	}
+	if p.Verbose {
+		for _, stats := range semanticStats {
+			log.Printf("[pipeline] Semantic refinement: %s", stats.String())
+		}
+	}
+	if removed := kg.RemoveDanglingRelationships(); removed > 0 {
+		log.Printf("[pipeline] Removed %d relationships with missing endpoints", removed)
 	}
 
 	result.StageStats[StageParse] = StageStat{

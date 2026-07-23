@@ -3,6 +3,7 @@ package ingest
 import (
 	"fmt"
 	"log"
+	"sort"
 	"strings"
 
 	graph "github.com/mengshi02/codetrip/internal/model"
@@ -424,6 +425,18 @@ func resolveCallTarget(
 	// B. Filter to callable symbol kinds (constructor-aware)
 	filteredCandidates := filterCallableCandidates(tiered.Candidates, argCount, callForm)
 	filteredCandidates = collapsePhysicalTargetDuplicates(filteredCandidates)
+	if len(filteredCandidates) == 0 && argCount >= 0 && tiered.Tier != TierUniqueGlobal {
+		// ParameterCount is the declared maximum. A single same-file or named/
+		// import-scoped callable may legally omit defaulted parameters.
+		defaultArgCandidates := filterCallableCandidates(tiered.Candidates, -1, callForm)
+		defaultArgCandidates = collapsePhysicalTargetDuplicates(defaultArgCandidates)
+		if len(defaultArgCandidates) == 1 && defaultArgCandidates[0].ParameterCount != nil && argCount <= *defaultArgCandidates[0].ParameterCount {
+			return &CallResolveResult{
+				NodeID: defaultArgCandidates[0].NodeID, Confidence: tierToConfidence(tiered.Tier),
+				Reason: tierToString(tiered.Tier) + "-default-args",
+			}
+		}
+	}
 
 	// D. Receiver-type filtering: for member calls with a known receiver type,
 	// filter candidates by ownerId matching the resolved type's nodeId
@@ -487,7 +500,13 @@ func visibleTypeDefinitions(typeName, currentFile string, ctx *ResolveContext) [
 		for imported := range ctx.ImportMap[file] {
 			if !visibleFiles[imported] {
 				visibleFiles[imported] = true
-				queue = append(queue, imported)
+				// C/C++ declarations routinely arrive through transitive
+				// header includes. Other languages do not make every symbol
+				// imported by a dependency visible to its importer; following
+				// their full import graph creates unrelated same-name matches.
+				if isCXXPath(currentFile) {
+					queue = append(queue, imported)
+				}
 			}
 		}
 	}
@@ -666,6 +685,12 @@ func ProcessCalls(
 				receiverName = ExtractReceiverName(nameNode, src)
 				if receiverName != "" {
 					receiverTypeName = LookupTypeEnv(typeEnv, receiverName, callNode, src)
+					if lang == "swift" && receiverName == "Self" && receiverTypeName == "" {
+						receiverTypeName = InferSwiftSelfType(callNode, src)
+					}
+					if lang == "swift" && receiverTypeName == "" {
+						receiverTypeName = InferSwiftGenericReceiverType(callNode, receiverName, src)
+					}
 				}
 			}
 
@@ -743,11 +768,58 @@ func ProcessCallsFromExtracted(
 	resolved := 0
 	builtin := 0
 	failed := 0
+	failureStats := make(map[string]int)
+	internalFailureNames := make(map[string]int)
+	internalFailureExamples := make(map[string]string)
+	recordFailure := func(call ExtractedCall, form CallForm, receiverType string) {
+		definitions := symbolTable.LookupFuzzy(call.CallName)
+		candidates := len(definitions)
+		bucket := "none"
+		if candidates == 1 {
+			bucket = "one"
+		} else if candidates > 1 {
+			bucket = "many"
+		}
+		formName := "free"
+		if form == CallFormMember {
+			formName = "member"
+		} else if form == CallFormConstructor {
+			formName = "constructor"
+		}
+		typeState := "untyped"
+		if receiverType != "" {
+			typeState = "typed"
+		}
+		failureStats[call.Language+"/"+formName+"/"+typeState+"/"+bucket]++
+		if candidates > 0 {
+			key := call.Language + ":" + call.CallName
+			internalFailureNames[key]++
+			if _, exists := internalFailureExamples[key]; !exists {
+				owners := make([]string, 0, 4)
+				seen := make(map[string]bool)
+				for _, definition := range definitions {
+					owner := definition.Type + ":" + definition.OwnerID
+					if !seen[owner] {
+						seen[owner] = true
+						owners = append(owners, owner)
+					}
+					if len(owners) == 4 {
+						break
+					}
+				}
+				internalFailureExamples[key] = fmt.Sprintf("file=%s receiver=%s type=%s owners=[%s]", call.FilePath, call.ReceiverName, receiverType, strings.Join(owners, "|"))
+			}
+		}
+	}
 
 	sampleIdx := 0
 	for _, call := range extractedCalls {
 		calledName := call.CallName
-		if calledName == "" || IsBuiltInOrNoiseForLanguage(calledName, call.Language) {
+		isNoise := calledName == "" || IsBuiltInOrNoiseForLanguage(calledName, call.Language)
+		// A name that is conventional in one runtime (run, map, find, close,
+		// etc.) may be a repository-defined symbol in another language. Only
+		// suppress it when the graph has no possible definition to resolve.
+		if isNoise && (calledName == "" || len(symbolTable.LookupFuzzy(calledName)) == 0) {
 			builtin++
 			if sampleIdx < 30 {
 				log.Printf("[call-processor] builtin/noise sample[%d]: name=%q file=%s form=%v", sampleIdx, calledName, call.FilePath, call.CallForm)
@@ -798,6 +870,43 @@ func ProcessCallsFromExtracted(
 			}
 		}
 		inferredKotlinConstructor := false
+		swiftImplicitConstructorTarget := ""
+		if ctx.AssignableOwnerIDs != nil && call.Language == "swift" && callForm == CallFormFree && calledName[0] >= 'A' && calledName[0] <= 'Z' {
+			var valueTypes []*SymbolDefinition
+			var referenceTypes []*SymbolDefinition
+			for _, candidate := range visibleTypeDefinitions(calledName, call.FilePath, ctx) {
+				if candidate.Type == "Class" || candidate.Type == "Struct" || candidate.Type == "Record" {
+					callForm = CallFormConstructor
+					if candidate.Type == "Struct" || candidate.Type == "Record" {
+						valueTypes = append(valueTypes, candidate)
+					} else {
+						referenceTypes = append(referenceTypes, candidate)
+					}
+				}
+			}
+			if len(valueTypes) == 1 {
+				swiftImplicitConstructorTarget = valueTypes[0].NodeID
+			} else if len(valueTypes) == 0 && len(referenceTypes) == 1 {
+				swiftImplicitConstructorTarget = referenceTypes[0].NodeID
+			}
+		}
+		pythonNamedCallable := false
+		if call.Language == "python" && ctx.NamedImportMap != nil {
+			for _, candidate := range WalkBindingChain(calledName, call.FilePath, symbolTable, ctx.NamedImportMap, symbolTable.LookupFuzzy(calledName)) {
+				if candidate.Type == "Function" || candidate.Type == "Method" {
+					pythonNamedCallable = true
+					break
+				}
+			}
+		}
+		if ctx.AssignableOwnerIDs != nil && call.Language == "python" && !pythonNamedCallable && callForm == CallFormFree && calledName[0] >= 'A' && calledName[0] <= 'Z' {
+			for _, candidate := range visibleTypeDefinitions(calledName, call.FilePath, ctx) {
+				if candidate.Type == "Class" || candidate.Type == "Struct" || candidate.Type == "Record" {
+					callForm = CallFormConstructor
+					break
+				}
+			}
+		}
 		if ctx.AssignableOwnerIDs != nil && call.Language == "kotlin" && callForm == CallFormFree && calledName[0] >= 'A' && calledName[0] <= 'Z' {
 			for _, candidate := range symbolTable.LookupFuzzy(calledName) {
 				if candidate.Type == "Class" || candidate.Type == "Struct" || candidate.Type == "Record" {
@@ -829,19 +938,15 @@ func ProcessCallsFromExtracted(
 		if call.CallForm == CallFormMember && receiverTypeName == "" && call.ReceiverName != "" {
 			// No type from extraction — leave empty, resolution falls back to name-only
 		}
-		if ctx.AssignableOwnerIDs != nil && callForm == CallFormMember && receiverTypeName == "" {
-			// A complex or value-like untyped receiver is not evidence for a
-			// repository-wide same-name target. Preserve it as unresolved instead
-			// of guessing. Uppercase receivers may be class/object names (Kotlin
-			// companion APIs and static-style calls) and retain scoped fallback.
-			likelyTypeReceiver := call.ReceiverName != "" && call.ReceiverName[0] >= 'A' && call.ReceiverName[0] <= 'Z'
-			if !likelyTypeReceiver {
-				failed++
-				continue
-			}
-		}
-
 		res := resolveCallTarget(calledName, call.FilePath, receiverTypeName, ctx, callForm, call.ArgCount)
+		if callForm == CallFormMember && receiverTypeName == "" && res != nil && res.Reason == "unique-global" {
+			// An untyped receiver may use same-file or import-scoped evidence, but
+			// never repository-wide uniqueness alone.
+			res = nil
+		}
+		if res == nil && swiftImplicitConstructorTarget != "" {
+			res = &CallResolveResult{NodeID: swiftImplicitConstructorTarget, Confidence: 0.8, Reason: "swift-implicit-value-constructor"}
+		}
 		if inferredKotlinConstructor && res != nil && res.Reason == "unique-global" {
 			res = nil
 		}
@@ -856,6 +961,7 @@ func ProcessCallsFromExtracted(
 		}
 		if res == nil {
 			failed++
+			recordFailure(call, callForm, receiverTypeName)
 			if failed <= 10 {
 				fuzzys := ctx.SymbolTable.LookupFuzzy(calledName)
 				log.Printf("[call-processor] resolve failed[%d]: name=%q file=%s form=%v fuzzyCount=%d", failed, calledName, call.FilePath, call.CallForm, len(fuzzys))
@@ -892,6 +998,41 @@ func ProcessCallsFromExtracted(
 		})
 	}
 	log.Printf("[call-processor] Result: %d resolved, %d builtin/noise, %d failed", resolved, builtin, failed)
+	if failed > 0 {
+		keys := make([]string, 0, len(failureStats))
+		for key := range failureStats {
+			keys = append(keys, key)
+		}
+		sort.Strings(keys)
+		parts := make([]string, 0, len(keys))
+		for _, key := range keys {
+			parts = append(parts, fmt.Sprintf("%s=%d", key, failureStats[key]))
+		}
+		log.Printf("[call-processor] Failure classes: %s", strings.Join(parts, ", "))
+
+		type namedCount struct {
+			name  string
+			count int
+		}
+		names := make([]namedCount, 0, len(internalFailureNames))
+		for name, count := range internalFailureNames {
+			names = append(names, namedCount{name: name, count: count})
+		}
+		sort.Slice(names, func(i, j int) bool {
+			if names[i].count == names[j].count {
+				return names[i].name < names[j].name
+			}
+			return names[i].count > names[j].count
+		})
+		if len(names) > 12 {
+			names = names[:12]
+		}
+		parts = parts[:0]
+		for _, item := range names {
+			parts = append(parts, fmt.Sprintf("%s=%d{%s}", item.name, item.count, internalFailureExamples[item.name]))
+		}
+		log.Printf("[call-processor] Top unresolved repository symbols: %s", strings.Join(parts, ", "))
+	}
 }
 
 func normalizeCppReturnType(value string) string {

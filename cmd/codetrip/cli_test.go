@@ -8,9 +8,9 @@ import (
 func TestRootCommandsUseSingleWords(t *testing.T) {
 	root := newRootCmd(newCLIFlags())
 	want := map[string]bool{
-		"embed": false, "export": false, "hybrid": false, "index": false,
-		"list": false, "mcp": false, "path": false, "search": false,
-		"source": false, "traverse": false, "version": false,
+		"check": false, "context": false, "delete": false, "diff": false, "embed": false, "export": false, "hybrid": false,
+		"impact": false, "index": false, "list": false, "mcp": false, "path": false, "search": false,
+		"rename": false, "source": false, "traverse": false, "version": false,
 	}
 	for _, command := range root.Commands() {
 		name := command.Name()

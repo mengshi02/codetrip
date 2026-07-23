@@ -15,6 +15,7 @@ type FileEntry struct {
 	IsDir        bool
 	Extension    string
 	LanguageID   string
+	ParserID     string
 }
 
 // WalkResult holds the result of a repository walk.
@@ -124,6 +125,7 @@ func WalkRepositoryPaths(repoPath string) (*WalkResult, error) {
 
 		ext := filepath.Ext(path)
 		langID := LanguageID(ext)
+		parserID := ParserID(ext)
 
 		entry := FileEntry{
 			RelativePath: relPath,
@@ -132,6 +134,7 @@ func WalkRepositoryPaths(repoPath string) (*WalkResult, error) {
 			IsDir:        false,
 			Extension:    ext,
 			LanguageID:   langID,
+			ParserID:     parserID,
 		}
 
 		result.Files = append(result.Files, entry)

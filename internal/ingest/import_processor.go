@@ -3,11 +3,72 @@ package ingest
 import (
 	"log"
 	"path/filepath"
+	"regexp"
 	"strings"
 
 	graph "github.com/mengshi02/codetrip/internal/model"
 	sitter "github.com/tree-sitter/go-tree-sitter"
 )
+
+var javaPackageDeclaration = regexp.MustCompile(`(?m)^\s*package\s+([A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*)\s*;`)
+var csharpNamespaceDeclaration = regexp.MustCompile(`(?m)^\s*namespace\s+([A-Za-z_][\w]*(?:\.[A-Za-z_][\w]*)*)\s*[;{]`)
+var phpNamespaceDeclaration = regexp.MustCompile(`(?m)^\s*namespace\s+([A-Za-z_][\w]*(?:\\[A-Za-z_][\w]*)*)\s*;`)
+
+// PopulateImplicitPackageVisibility records files that are mutually visible
+// without explicit imports. Java compilation units in the same package can
+// reference one another directly; treating only explicit imports as visible
+// creates dangling heritage targets and unresolved same-package calls.
+func PopulateImplicitPackageVisibility(files []FileInput, imports ImportMap) {
+	packages := make(map[string][]string)
+	for _, file := range files {
+		language := GetLanguageFromFilename(file.Path)
+		if language == "swift" {
+			if target := swiftTargetForPath(file.Path); target != "" {
+				packages[language+"\x00"+target] = append(packages[language+"\x00"+target], file.Path)
+			}
+			continue
+		}
+		var expression *regexp.Regexp
+		switch language {
+		case "java":
+			expression = javaPackageDeclaration
+		case "csharp":
+			expression = csharpNamespaceDeclaration
+		case "php":
+			expression = phpNamespaceDeclaration
+		default:
+			continue
+		}
+		match := expression.FindStringSubmatch(file.Content)
+		packageName := ""
+		if len(match) == 2 {
+			packageName = match[1]
+		}
+		packages[language+"\x00"+packageName] = append(packages[language+"\x00"+packageName], file.Path)
+	}
+	for _, packageFiles := range packages {
+		for _, source := range packageFiles {
+			for _, target := range packageFiles {
+				if source != target {
+					imports.AddImport(source, target)
+				}
+			}
+		}
+	}
+}
+
+// SwiftPM compiles every Swift file beneath one Sources/<target> or
+// Tests/<target> directory as a single module. Symbols in those files are
+// visible to one another without explicit imports.
+func swiftTargetForPath(path string) string {
+	parts := strings.Split(filepath.ToSlash(filepath.Clean(path)), "/")
+	for i := 0; i+1 < len(parts); i++ {
+		if parts[i] == "Sources" || parts[i] == "Tests" {
+			return strings.Join(parts[:i+2], "/")
+		}
+	}
+	return ""
+}
 
 // SuffixIndex provides O(1) suffix-based file path lookup.
 type SuffixIndex struct {
@@ -87,7 +148,7 @@ func (si *SuffixIndex) GetFilesInDir(dirSuffix, ext string) []string {
 var ResolveExtensions = []string{
 	"", ".tsx", ".ts", ".jsx", ".js", "/index.tsx", "/index.ts", "/index.jsx", "/index.js",
 	".py", "/__init__.py", ".java", ".kt", ".go", ".cs", ".php", ".rs", ".swift",
-	".c", ".cpp", ".h", ".hpp", ".m", ".mm", ".rb", ".scala", ".vue", ".svelte",
+	".c", ".cpp", ".h", ".hpp", ".m", ".mm", ".vue", ".svelte",
 }
 
 func TryResolveWithExtensions(base string, afp map[string]bool) string {
@@ -408,11 +469,13 @@ func resolveCSharpNamespaceDir(raw string, cfgs []CSharpProjectConfig) string {
 
 func resolvePhpImport(raw string, cfg *ComposerConfig, afp map[string]bool, nfl, afl []string, idx *SuffixIndex) string {
 	if cfg != nil && len(cfg.PSR4) > 0 {
+		matchedLocalPrefix := false
 		for prefix, dir := range cfg.PSR4 {
 			if strings.HasPrefix(raw, prefix) {
-				rel := strings.TrimPrefix(raw, prefix)
+				matchedLocalPrefix = true
+				rel := strings.TrimLeft(strings.TrimPrefix(raw, prefix), `\\/`)
 				rel = strings.ReplaceAll(rel, "\\", "/")
-				sp := dir + "/" + rel
+				sp := pathNorm(dir + "/" + rel)
 				if afp[sp+".php"] {
 					return sp + ".php"
 				}
@@ -423,6 +486,14 @@ func resolvePhpImport(raw string, cfg *ComposerConfig, afp map[string]bool, nfl,
 				}
 			}
 		}
+		// Composer is authoritative about namespaces owned by this package.
+		// Imports outside those prefixes are external; a local-prefix import
+		// whose file is absent is unresolved/generated. Do not bind either one
+		// to an unrelated repository class by simple filename.
+		if !matchedLocalPrefix {
+			return ""
+		}
+		return ""
 	}
 	sp := strings.ReplaceAll(raw, "\\", "/")
 	for _, ext := range []string{".php"} {
@@ -456,12 +527,24 @@ func resolvePhpImport(raw string, cfg *ComposerConfig, afp map[string]bool, nfl,
 }
 
 func resolveRustImport(fp string, raw string, afp map[string]bool) string {
+	raw = normalizeRustUsePath(raw)
+	if raw == "" {
+		return ""
+	}
 	var modulePath string
 	switch {
 	case strings.HasPrefix(raw, "crate::"):
 		modulePath = strings.ReplaceAll(strings.TrimPrefix(raw, "crate::"), "::", "/")
-		if resolved := tryRustModulePath("src/"+modulePath, afp); resolved != "" {
+		crateRoot := rustCrateSourceRoot(fp)
+		if resolved := tryRustModulePath(filepath.ToSlash(filepath.Join(crateRoot, modulePath)), afp); resolved != "" {
 			return resolved
+		}
+		// Keep the repository-root fallback for unusual layouts where source
+		// files are generated beneath a workspace but refer to the root crate.
+		if crateRoot != "src" {
+			if resolved := tryRustModulePath("src/"+modulePath, afp); resolved != "" {
+				return resolved
+			}
 		}
 		return tryRustModulePath(modulePath, afp)
 	case strings.HasPrefix(raw, "self::"):
@@ -476,6 +559,29 @@ func resolveRustImport(fp string, raw string, afp map[string]bool) string {
 	default:
 		return ""
 	}
+}
+
+// normalizeRustUsePath reduces a grouped use declaration to the module that
+// makes all bindings visible. For example, crate::process::{Reader, Builder}
+// imports both symbols from crate::process, so resolving the containing module
+// is sufficient for scoped semantic lookup.
+func normalizeRustUsePath(raw string) string {
+	raw = strings.TrimSpace(strings.TrimSuffix(strings.TrimSpace(raw), ";"))
+	if grouped := strings.Index(raw, "::{"); grouped >= 0 {
+		raw = raw[:grouped]
+	}
+	return strings.TrimSpace(raw)
+}
+
+func rustCrateSourceRoot(fp string) string {
+	fp = filepath.ToSlash(filepath.Clean(fp))
+	if fp == "src" || strings.HasPrefix(fp, "src/") {
+		return "src"
+	}
+	if marker := strings.LastIndex(fp, "/src/"); marker >= 0 {
+		return fp[:marker+len("/src")]
+	}
+	return "src"
 }
 
 func tryRustModulePath(modulePath string, afp map[string]bool) string {
@@ -800,6 +906,9 @@ func applyImportResult(g *graph.KnowledgeGraph, src string, ir *ImportResult, im
 	switch ir.Kind {
 	case ImportResultFiles:
 		for _, tgt := range ir.Files {
+			if tgt == src {
+				continue
+			}
 			fileTgt := "File:" + tgt
 			im.AddImport(src, tgt)
 			g.AddRelationship(&graph.GraphRelationship{
@@ -812,6 +921,9 @@ func applyImportResult(g *graph.KnowledgeGraph, src string, ir *ImportResult, im
 		}
 	case ImportResultPackage:
 		for _, tgt := range ir.Files {
+			if tgt == src {
+				continue
+			}
 			fileTgt := "File:" + tgt
 			im.AddImport(src, tgt)
 			g.AddRelationship(&graph.GraphRelationship{

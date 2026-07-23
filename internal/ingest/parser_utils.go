@@ -20,6 +20,12 @@ func GetLanguageFromFilename(filename string) string {
 	return LanguageID(ext)
 }
 
+// GetParserFromFilename returns the internal grammar/dialect identifier.
+func GetParserFromFilename(filename string) string {
+	ext := strings.ToLower(filepath.Ext(filename))
+	return ParserID(ext)
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // GetDefinitionNodeFromCaptures extracts the definition node from a capture map.
 // Iterates through DefinitionCaptureKeys in priority order.
@@ -235,23 +241,13 @@ func FindEnclosingClassId(node *sitter.Node, filePath string, source []byte) str
 		}
 
 		if ClassContainerTypes[current.Kind()] {
-			// Rust impl_item: for `impl Trait for Struct {}`, pick the type after `for`
+			// Rust methods belong to the implemented concrete type. The impl block
+			// remains a structural node, but using it as the callable owner prevents
+			// receiver-type resolution and method-implementation enrichment.
 			if current.Kind() == "impl_item" {
-				forIdx := -1
-				for i := uint(0); i < current.ChildCount(); i++ {
-					c := current.Child(i)
-					if c != nil && !c.IsNamed() && c.Utf8Text(source) == "for" {
-						forIdx = int(i)
-						break
-					}
-				}
-				if forIdx != -1 {
-					for i := uint(forIdx + 1); i < current.ChildCount(); i++ {
-						c := current.Child(i)
-						if c != nil && (c.Kind() == "type_identifier" || c.Kind() == "identifier") {
-							return graph.GenerateID("Impl", filePath+":"+c.Utf8Text(source))
-						}
-					}
+				typeNode := current.ChildByFieldName("type")
+				if typeName := extractSimpleTypeName(typeNode, source); typeName != "" {
+					return graph.GenerateID("Struct", filePath+":"+typeName)
 				}
 			}
 
@@ -445,6 +441,41 @@ func extractReceiverBinding(receiver *sitter.Node, source []byte) string {
 	if receiver.Kind() == "subscript_expression" {
 		return extractReceiverBinding(receiver.ChildByFieldName("argument"), source)
 	}
+	if receiver.Kind() == "attribute" {
+		object := receiver.ChildByFieldName("object")
+		attribute := receiver.ChildByFieldName("attribute")
+		base := extractReceiverBinding(object, source)
+		if base != "" && attribute != nil && attribute.Kind() == "identifier" {
+			return base + "." + attribute.Utf8Text(source)
+		}
+	}
+	if receiver.Kind() == "member_expression" {
+		object := receiver.ChildByFieldName("object")
+		property := receiver.ChildByFieldName("property")
+		base := extractReceiverBinding(object, source)
+		if base != "" && property != nil && (property.Kind() == "property_identifier" || property.Kind() == "identifier") {
+			return base + "." + property.Utf8Text(source)
+		}
+	}
+	if receiver.Kind() == "member_access_expression" {
+		object := receiver.ChildByFieldName("object")
+		name := receiver.ChildByFieldName("name")
+		base := extractReceiverBinding(object, source)
+		if base != "" && name != nil && name.Kind() == "name" {
+			return base + "->" + name.Utf8Text(source)
+		}
+	}
+	if receiver.Kind() == "field_expression" {
+		value := receiver.ChildByFieldName("value")
+		if value == nil {
+			value = receiver.ChildByFieldName("argument")
+		}
+		field := receiver.ChildByFieldName("field")
+		base := extractReceiverBinding(value, source)
+		if base != "" && field != nil && (field.Kind() == "field_identifier" || field.Kind() == "identifier") {
+			return base + "." + field.Utf8Text(source)
+		}
+	}
 	return ""
 }
 
@@ -562,6 +593,7 @@ var paramListTypes = map[string]bool{
 	"function_parameters":       true,
 	"method_parameters":         true,
 	"function_value_parameters": true,
+	"parameter_clause":          true, // Swift
 }
 
 // variadicParamTypes for variadic/rest parameter detection
@@ -601,6 +633,9 @@ func ExtractMethodSignature(node *sitter.Node, source []byte) MethodSignature {
 				continue
 			}
 			paramText := param.Utf8Text(source)
+			if parameterList.NamedChildCount() == 1 && param.Kind() == "parameter_declaration" && strings.TrimSpace(paramText) == "void" {
+				continue
+			}
 			if paramText == "self" || paramText == "&self" || paramText == "&mut self" || param.Kind() == "self_parameter" {
 				continue
 			}
@@ -631,6 +666,13 @@ func ExtractMethodSignature(node *sitter.Node, source []byte) MethodSignature {
 					isVariadic = true
 					break
 				}
+			}
+		}
+	}
+	if parameterList == nil && (node.Kind() == "init_declaration" || node.Kind() == "function_declaration" || node.Kind() == "protocol_function_declaration") {
+		for i := uint(0); i < node.NamedChildCount(); i++ {
+			if child := node.NamedChild(i); child != nil && child.Kind() == "parameter" {
+				parameterCount++
 			}
 		}
 	}

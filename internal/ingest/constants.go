@@ -32,7 +32,7 @@ var SupportedLanguages = map[string]string{
 	".go": "go",
 	// TypeScript / JavaScript
 	".ts":  "typescript",
-	".tsx": "tsx",
+	".tsx": "typescript",
 	".js":  "javascript",
 	".jsx": "javascript",
 	// Python
@@ -52,8 +52,6 @@ var SupportedLanguages = map[string]string{
 	".cs": "csharp",
 	// Rust
 	".rs": "rust",
-	// Ruby
-	".rb": "ruby",
 	// PHP
 	".php": "php",
 	// Swift
@@ -61,18 +59,13 @@ var SupportedLanguages = map[string]string{
 	// Kotlin
 	".kt":  "kotlin",
 	".kts": "kotlin",
-	// Scala
-	".scala": "scala",
-	// Dart
-	".dart": "dart",
-	// Lua
-	".lua": "lua",
-	// Zig
-	".zig": "zig",
-	// Shell
-	".sh":   "bash",
-	".bash": "bash",
-	".zsh":  "bash",
+}
+
+// ParserDialects selects a grammar that differs from the canonical language.
+// Dialects are internal parser details and must not leak into graph language
+// properties, search filters, or user-facing language statistics.
+var ParserDialects = map[string]string{
+	".tsx": "tsx",
 }
 
 // LanguageID returns the language identifier for a file extension, or empty string if unsupported.
@@ -81,6 +74,14 @@ func LanguageID(ext string) string {
 		return lang
 	}
 	return ""
+}
+
+// ParserID returns the tree-sitter grammar identifier for an extension.
+func ParserID(ext string) string {
+	if parser, ok := ParserDialects[ext]; ok {
+		return parser
+	}
+	return LanguageID(ext)
 }
 
 // SkipDirectories lists directories to skip during repository walking.
@@ -230,7 +231,6 @@ var FunctionNodeTypes = map[string]bool{
 	"local_function_statement": true,
 	// Rust
 	"function_item": true,
-	"impl_item":     true,
 	// PHP
 	"anonymous_function": true,
 	// Kotlin

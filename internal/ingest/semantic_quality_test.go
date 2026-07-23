@@ -361,6 +361,63 @@ func TestCppHeritageNeverUsesSameNamedConstructors(t *testing.T) {
 	t.Fatal("Child -> Base EXTENDS relation not emitted")
 }
 
+func TestImportScopedFunctionAllowsOmittedDefaultArguments(t *testing.T) {
+	st := NewSymbolTable()
+	three := 3
+	st.Add("params.py", "Query", "Function:params.py:Query", "Function", &three, "", 0, 100)
+	imports := NewImportMap()
+	imports.AddImport("main.py", "params.py")
+	ctx := &ResolveContext{SymbolTable: st, ImportMap: imports, NamedImportMap: make(NamedImportMap)}
+	resolved := resolveCallTarget("Query", "main.py", "", ctx, CallFormFree, 0)
+	if resolved == nil || resolved.NodeID != "Function:params.py:Query" || resolved.Reason != "import-resolved-default-args" {
+		t.Fatalf("defaulted imported function resolved to %#v", resolved)
+	}
+}
+
+func TestUnresolvedExternalHeritageDoesNotCreateDanglingEdge(t *testing.T) {
+	g := graph.NewKnowledgeGraph()
+	st := NewSymbolTable()
+	ProcessParsing(
+		g, []FileInput{{Path: "model.py", Content: "class Item(ExternalModel):\n    pass\n"}}, st,
+		NewLanguageRegistry(), nil,
+	)
+	ProcessHeritageFromExtracted(
+		g,
+		[]ExtractedHeritage{{FilePath: "model.py", ChildID: "Item", ParentName: "ExternalModel", HeritageType: "extends"}},
+		st, NewImportMap(), NewPackageMap(), make(NamedImportMap), make(ImportOrderMap),
+	)
+	for _, relation := range g.Relationships() {
+		if relation.Type == graph.RelEXTENDS || relation.Type == graph.RelIMPLEMENTS {
+			t.Fatalf("unresolved external heritage created a dangling edge: %#v", relation)
+		}
+	}
+}
+
+func TestSameNamedGenericClassCanExtendNonGenericBase(t *testing.T) {
+	files := []FileInput{
+		{Path: "src/Mock.cs", Content: "namespace Sample; public abstract class Mock { protected abstract object OnGetObject(); }"},
+		{Path: "src/Mock`1.cs", Content: "namespace Sample; public class Mock<T> : Mock { protected override object OnGetObject() => null; }"},
+	}
+	g := graph.NewKnowledgeGraph()
+	st := NewSymbolTable()
+	extracted := ProcessParsing(g, files, st, NewLanguageRegistry(), nil)
+	st.FinalizeRangeIndex()
+	imports := NewImportMap()
+	PopulateImplicitPackageVisibility(files, imports)
+	ProcessHeritageFromExtracted(
+		g, extracted.Heritage, st, imports, NewPackageMap(),
+		NewNamedImportMap(), make(ImportOrderMap),
+	)
+	for _, relation := range g.Relationships() {
+		if relation.Type == graph.RelEXTENDS &&
+			relation.SourceID == "Class:src/Mock`1.cs:Mock" &&
+			relation.TargetID == "Class:src/Mock.cs:Mock" {
+			return
+		}
+	}
+	t.Fatal("same-named generic class did not extend its non-generic base")
+}
+
 func TestCppPreprocessorWrappedOrdinaryMethodOwnsCalls(t *testing.T) {
 	source := `
 class Response { public: void end() {} };

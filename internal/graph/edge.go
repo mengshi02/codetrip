@@ -1,6 +1,6 @@
 package graph
 
-// RelType represents relationship types (29 types)
+// RelType represents a persisted graph relationship type.
 type RelType string
 
 const (
@@ -18,6 +18,7 @@ const (
 	RelAccesses          RelType = "ACCESSES"
 	RelMethodOverrides   RelType = "METHOD_OVERRIDES"
 	RelMethodImplements  RelType = "METHOD_IMPLEMENTS"
+	RelDispatchesTo      RelType = "DISPATCHES_TO"
 	RelMemberOf          RelType = "MEMBER_OF"
 	RelStepInProcess     RelType = "STEP_IN_PROCESS"
 	RelEntryPointOf      RelType = "ENTRY_POINT_OF"

@@ -2,6 +2,7 @@ package enrich
 
 import (
 	"fmt"
+	"strings"
 
 	graph "github.com/mengshi02/codetrip/internal/model"
 )
@@ -57,6 +58,18 @@ type MROResult struct {
 	Entries        []MROEntry
 	OverrideEdges  int
 	AmbiguityCount int
+}
+
+func hasCSharpOverrideModifier(node *graph.GraphNode) bool {
+	if node == nil {
+		return false
+	}
+	for _, modifier := range strings.Fields(node.Properties.Modifiers) {
+		if modifier == "override" {
+			return true
+		}
+	}
+	return false
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -446,8 +459,17 @@ func ComputeMRO(g *graph.KnowledgeGraph) MROResult {
 			for _, ancestorID := range mroOrder {
 				matched := false
 				for _, inheritedID := range a.methodMap[ancestorID] {
+					if ownMethodID == inheritedID {
+						continue
+					}
 					inheritedNode, ok := g.GetNode(inheritedID)
 					if ok && inheritedNode.Properties.Name == ownNode.Properties.Name {
+						ancestorNode, ancestorOK := g.GetNode(ancestorID)
+						if language == "csharp" &&
+							(!ancestorOK || ancestorNode.Label != graph.LabelInterface) &&
+							!hasCSharpOverrideModifier(ownNode) {
+							continue
+						}
 						relID := graph.GenerateID("OVERRIDES", ownMethodID+"->"+inheritedID)
 						g.AddRelationship(&graph.GraphRelationship{
 							ID: relID, SourceID: ownMethodID, TargetID: inheritedID,
@@ -455,6 +477,20 @@ func ComputeMRO(g *graph.KnowledgeGraph) MROResult {
 							Reason: "direct semantic override",
 						})
 						overrideEdges++
+						if a.parentEdgeType[classID][ancestorID] == string(graph.RelIMPLEMENTS) {
+							g.AddRelationship(&graph.GraphRelationship{
+								ID:       graph.GenerateID("METHOD_IMPLEMENTS", ownMethodID+"->"+inheritedID),
+								SourceID: ownMethodID, TargetID: inheritedID,
+								Type: graph.RelMETHOD_IMPLEMENTS, Confidence: 1.0,
+								Reason: "direct interface method implementation",
+							})
+							g.AddRelationship(&graph.GraphRelationship{
+								ID:       graph.GenerateID("DISPATCHES_TO", inheritedID+"->"+ownMethodID),
+								SourceID: inheritedID, TargetID: ownMethodID,
+								Type: graph.RelDISPATCHES_TO, Confidence: 1.0,
+								Reason: "interface method dispatch",
+							})
+						}
 						matched = true
 						break
 					}

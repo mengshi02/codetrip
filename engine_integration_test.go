@@ -6,6 +6,7 @@ import (
 	"hash/fnv"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/mengshi02/codetrip/internal/graph"
@@ -16,6 +17,12 @@ func TestIndexRepoPersistsValidatedGraphAndExportsCSV(t *testing.T) {
 	dataDir := filepath.Join(t.TempDir(), "data")
 	source := []byte("package fixture\n\nfunc Work() {}\nfunc Run() { Work() }\n")
 	if err := os.WriteFile(filepath.Join(repository, "main.go"), source, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(repository, "README.md"), []byte("Work is documented here.\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(repository, "CMakeLists.txt"), []byte("# Work engineering configuration\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	engine, err := Open(dataDir)
@@ -57,10 +64,80 @@ func TestIndexRepoPersistsValidatedGraphAndExportsCSV(t *testing.T) {
 	if err != nil || len(traversal.Nodes) != 1 || traversal.Nodes[0].Name != "Work" {
 		t.Fatalf("CALLS traversal=%#v, error=%v", traversal, err)
 	}
+	if len(traversal.Edges) != 1 || traversal.Edges[0].Type != "CALLS" || traversal.Edges[0].ID == "" {
+		t.Fatalf("CALLS traversal edges=%#v", traversal.Edges)
+	}
+	symbolContext, err := engine.Context(context.Background(), &ContextRequest{
+		Repo: "fixture", NodeID: traversal.Nodes[0].ID,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if symbolContext.Symbol.Name != "Work" || len(symbolContext.Relations) != 1 {
+		t.Fatalf("symbol context=%#v", symbolContext)
+	}
+	if !strings.Contains(symbolContext.Content, "func Work()") {
+		manifest, _ := os.ReadFile(filepath.Join(engine.repoDirs["fixture"], "manifest.json"))
+		t.Fatalf("symbol context content=%q symbol=%#v manifest=%s", symbolContext.Content, symbolContext.Symbol, manifest)
+	}
+	if relation := symbolContext.Relations[0]; relation.Direction != "in" ||
+		relation.Relation.Type != "CALLS" || relation.Node.Name != "Run" {
+		t.Fatalf("unexpected context relation=%#v", relation)
+	}
+	impact, err := engine.Impact(context.Background(), &ImpactRequest{
+		Repo: "fixture", NodeID: traversal.Nodes[0].ID, MaxDepth: 3,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(impact.Impacted) != 1 || impact.Impacted[0].Node.Name != "Run" ||
+		impact.Impacted[0].Depth != 1 || impact.Impacted[0].Via.Type != "CALLS" {
+		t.Fatalf("impact=%#v", impact)
+	}
+	rename, err := engine.Rename(context.Background(), &RenameRequest{
+		Repo: "fixture", NodeID: traversal.Nodes[0].ID, NewName: "Execute",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !rename.Safe || rename.OldName != "Work" || rename.NewName != "Execute" ||
+		len(rename.SemanticReferences) != 1 || rename.SemanticReferences[0].Node.Name != "Run" {
+		t.Fatalf("rename=%#v", rename)
+	}
+	var declarations, semanticReferences int
+	for _, occurrence := range rename.Occurrences {
+		switch occurrence.Kind {
+		case "declaration":
+			declarations++
+		case "semantic-reference":
+			semanticReferences++
+		}
+	}
+	if declarations != 1 || semanticReferences != 1 {
+		t.Fatalf("rename occurrences=%#v", rename.Occurrences)
+	}
+	conflictingRename, err := engine.Rename(context.Background(), &RenameRequest{
+		Repo: "fixture", NodeID: traversal.Nodes[0].ID, NewName: "Run",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if conflictingRename.Safe || len(conflictingRename.Conflicts) != 1 ||
+		conflictingRename.Conflicts[0].Severity != "error" {
+		t.Fatalf("conflicting rename=%#v", conflictingRename)
+	}
+	check, err := engine.Check(context.Background(), &CheckRequest{Repo: "fixture"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if check.Summary.NodesScanned != result.Nodes || check.Summary.EdgesScanned != result.Edges ||
+		check.Summary.Errors != 0 || check.Summary.Warnings != 0 || len(check.Findings) != 0 {
+		t.Fatalf("check=%#v", check)
+	}
 	path, err := engine.ShortestPath(context.Background(), &PathRequest{
 		Repo: "fixture", SourceNodeID: nodes[0].ID, TargetNodeID: traversal.Nodes[0].ID,
 	})
-	if err != nil || len(path.Edges) != 1 || path.Edges[0].Type != "CALLS" {
+	if err != nil || len(path.Edges) != 1 || path.Edges[0].Type != "CALLS" || path.Edges[0].ID == "" {
 		t.Fatalf("shortest path=%#v, error=%v", path, err)
 	}
 	searchResult, err := engine.Search(context.Background(), &SearchRequest{Repo: "fixture", Query: "Run", Limit: 10})
@@ -70,6 +147,22 @@ func TestIndexRepoPersistsValidatedGraphAndExportsCSV(t *testing.T) {
 	sourceResult, err := engine.SearchSource(context.Background(), &SourceSearchRequest{Repo: "fixture", Query: "Work", Limit: 10})
 	if err != nil || len(sourceResult.Results) == 0 || sourceResult.Results[0].FilePath != "main.go" {
 		t.Fatalf("source search=%#v, error=%v", sourceResult, err)
+	}
+	for _, match := range sourceResult.Results {
+		if match.FilePath == "README.md" {
+			t.Fatalf("default code scope returned documentation: %#v", sourceResult)
+		}
+	}
+	docsResult, err := engine.SearchSource(context.Background(), &SourceSearchRequest{Repo: "fixture", Query: "Work", Scope: "docs", Limit: 10})
+	if err != nil || len(docsResult.Results) != 1 || docsResult.Results[0].FilePath != "README.md" {
+		t.Fatalf("docs source search=%#v, error=%v", docsResult, err)
+	}
+	allResult, err := engine.SearchSource(context.Background(), &SourceSearchRequest{Repo: "fixture", Query: "Work", Scope: "all", Limit: 10})
+	if err != nil || len(allResult.Results) < 3 {
+		t.Fatalf("all source search=%#v, error=%v", allResult, err)
+	}
+	if _, err := engine.SearchSource(context.Background(), &SourceSearchRequest{Repo: "fixture", Query: "Work", Scope: "invalid"}); !errors.Is(err, ErrInvalidRequest) {
+		t.Fatalf("invalid source scope error=%v, want ErrInvalidRequest", err)
 	}
 	embedResult, err := engine.EmbedRepo(context.Background(), "fixture", deterministicEmbedder{}, nil)
 	if err != nil || embedResult.NodesEmbedded == 0 {
@@ -122,6 +215,83 @@ func TestIndexRepoPersistsValidatedGraphAndExportsCSV(t *testing.T) {
 		if _, err := os.Stat(filepath.Join(fullDir, name)); err != nil {
 			t.Fatalf("full export %s missing: %v", name, err)
 		}
+	}
+}
+
+func TestRepositoriesUseIndependentStoresAndDeleteAtomically(t *testing.T) {
+	dataDir := filepath.Join(t.TempDir(), "data")
+	firstSource := t.TempDir()
+	secondSource := t.TempDir()
+	if err := os.WriteFile(filepath.Join(firstSource, "first.go"), []byte("package first\nfunc First() {}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(secondSource, "second.go"), []byte("package second\nfunc Second() {}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	creator, err := Open(dataDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := creator.IndexRepo(context.Background(), firstSource, WithRepoName("first")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := creator.IndexRepo(context.Background(), secondSource, WithRepoName("second")); err != nil {
+		t.Fatal(err)
+	}
+	firstRoot, secondRoot := creator.repoDirs["first"], creator.repoDirs["second"]
+	if firstRoot == secondRoot || firstRoot == "" || secondRoot == "" {
+		t.Fatalf("repository roots are not isolated: first=%q second=%q", firstRoot, secondRoot)
+	}
+	if err := creator.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	firstEngine, err := Open(dataDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer firstEngine.Close()
+	secondEngine, err := Open(dataDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer secondEngine.Close()
+	if _, err := firstEngine.Search(context.Background(), &SearchRequest{Repo: "first", Query: "First"}); err != nil {
+		t.Fatalf("open first repository: %v", err)
+	}
+	if _, err := secondEngine.Search(context.Background(), &SearchRequest{Repo: "second", Query: "Second"}); err != nil {
+		t.Fatalf("second repository was blocked by first repository lock: %v", err)
+	}
+	if err := secondEngine.DeleteRepo(context.Background(), "first"); err == nil {
+		t.Fatal("deleted a repository locked by another engine")
+	}
+	if _, err := os.Stat(firstRoot); err != nil {
+		t.Fatalf("locked repository was modified: %v", err)
+	}
+	secondEngine.mu.Lock()
+	secondEngine.indexing["second"] = struct{}{}
+	secondEngine.mu.Unlock()
+	if err := secondEngine.DeleteRepo(context.Background(), "second"); !errors.Is(err, ErrRepoBusy) {
+		t.Fatalf("delete busy repository error=%v, want ErrRepoBusy", err)
+	}
+	secondEngine.mu.Lock()
+	delete(secondEngine.indexing, "second")
+	secondEngine.mu.Unlock()
+	if err := secondEngine.DeleteRepo(context.Background(), "second"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(secondRoot); !os.IsNotExist(err) {
+		t.Fatalf("deleted repository directory remains: %v", err)
+	}
+	if _, err := os.Stat(firstRoot); err != nil {
+		t.Fatalf("unrelated repository was affected: %v", err)
+	}
+	repositories, err := secondEngine.ListRepos()
+	if err != nil || len(repositories) != 1 || repositories[0].Name != "first" {
+		t.Fatalf("repositories after delete=%#v err=%v", repositories, err)
+	}
+	if err := secondEngine.DeleteRepo(context.Background(), "second"); !errors.Is(err, ErrRepoNotFound) {
+		t.Fatalf("second delete error=%v, want ErrRepoNotFound", err)
 	}
 }
 
@@ -218,7 +388,7 @@ func TestReplaceRepositoryPublishesNewSnapshotAndCollectsOldOne(t *testing.T) {
 	if reopened.graphStore("fixture").Repo() != newPhysical {
 		t.Fatal("replacement was not durable")
 	}
-	oldStore := graph.NewGraphStore(reopened.store, oldPhysical)
+	oldStore := graph.NewGraphStore(reopened.stores["fixture"], oldPhysical)
 	oldNodes, err := oldStore.GetNodesByName(oldPhysical, "OldName")
 	if err != nil {
 		t.Fatal(err)
@@ -226,7 +396,8 @@ func TestReplaceRepositoryPublishesNewSnapshotAndCollectsOldOne(t *testing.T) {
 	if len(oldNodes) != 0 {
 		t.Fatalf("retired graph still has %d nodes", len(oldNodes))
 	}
-	for _, path := range []string{filepath.Join(dataDir, "index", oldPhysical), filepath.Join(dataDir, "content", oldPhysical), filepath.Join(dataDir, "vectors", oldPhysical)} {
+	repoRoot := reopened.repoDirs["fixture"]
+	for _, path := range []string{filepath.Join(repoRoot, "index", oldPhysical), filepath.Join(repoRoot, "content", oldPhysical), filepath.Join(repoRoot, "vectors", oldPhysical)} {
 		if _, err := os.Stat(path); !os.IsNotExist(err) {
 			t.Fatalf("retired artifact remains: %s", path)
 		}

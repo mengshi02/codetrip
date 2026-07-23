@@ -142,6 +142,38 @@ func (g *KnowledgeGraph) Relationships() []*GraphRelationship {
 	return result
 }
 
+// RemoveRelationships removes every relationship selected by predicate.
+func (g *KnowledgeGraph) RemoveRelationships(predicate func(*GraphRelationship) bool) int {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	removed := 0
+	for id, relationship := range g.relationshipMap {
+		if predicate(relationship) {
+			delete(g.relationshipMap, id)
+			removed++
+		}
+	}
+	return removed
+}
+
+// RemoveDanglingRelationships enforces the persisted graph invariant that
+// every relationship endpoint is a materialized node. Run this before graph
+// enrichment introduces its own community/process nodes.
+func (g *KnowledgeGraph) RemoveDanglingRelationships() int {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	removed := 0
+	for id, relationship := range g.relationshipMap {
+		_, sourceExists := g.nodeMap[relationship.SourceID]
+		_, targetExists := g.nodeMap[relationship.TargetID]
+		if !sourceExists || !targetExists {
+			delete(g.relationshipMap, id)
+			removed++
+		}
+	}
+	return removed
+}
+
 // RemoveNode removes a node and all relationships involving it.
 func (g *KnowledgeGraph) RemoveNode(nodeID string) bool {
 	g.mu.Lock()

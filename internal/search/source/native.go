@@ -8,6 +8,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"regexp/syntax"
 	"sort"
 	"strings"
 	"sync"
@@ -48,7 +49,7 @@ func (idx *Index) Build(repositoryPath, snapshot string) error {
 			return walkErr
 		}
 		if entry.IsDir() {
-			if path != repositoryPath && (entry.Name() == ".git" || entry.Name() == ".codetrip") {
+			if path != repositoryPath && shouldSkipDirectory(entry.Name()) {
 				return filepath.SkipDir
 			}
 			return nil
@@ -63,6 +64,9 @@ func (idx *Index) Build(repositoryPath, snapshot string) error {
 		content, err := os.ReadFile(path)
 		if err != nil {
 			return err
+		}
+		if ClassifyFile(path, content) == "" {
+			return nil
 		}
 		return builder.AddFile(filepath.ToSlash(relative), content)
 	})
@@ -129,10 +133,27 @@ func (idx *Index) Open() error {
 	return nil
 }
 
-func (idx *Index) Search(ctx context.Context, queryText string, limit, contextLines int) ([]Match, error) {
+func (idx *Index) Search(ctx context.Context, queryText string, scope Scope, limit, contextLines int) ([]Match, error) {
 	query, err := enginequery.Parse(queryText)
 	if err != nil {
 		return nil, fmt.Errorf("parse content query: %w", err)
+	}
+	if pattern := scopePathPattern(scope); pattern != "" {
+		parsed, parseErr := syntax.Parse(pattern, syntax.Perl)
+		if parseErr != nil {
+			return nil, fmt.Errorf("build source scope query: %w", parseErr)
+		}
+		scopeQuery := enginequery.Q(&enginequery.Regexp{Regexp: parsed, FileName: true, CaseSensitive: false})
+		// CMakeLists.txt is engineering configuration even though .txt is also
+		// a documentation extension. Mirror ClassifyFile's filename priority.
+		if scope == ScopeDocs {
+			excluded, excludeErr := syntax.Parse(codeFileNamePattern(), syntax.Perl)
+			if excludeErr != nil {
+				return nil, fmt.Errorf("build source scope exclusion: %w", excludeErr)
+			}
+			scopeQuery = enginequery.NewAnd(scopeQuery, &enginequery.Not{Child: &enginequery.Regexp{Regexp: excluded, FileName: true, CaseSensitive: false}})
+		}
+		query = enginequery.NewAnd(query, scopeQuery)
 	}
 	if limit <= 0 {
 		limit = 20

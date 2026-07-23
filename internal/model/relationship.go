@@ -4,19 +4,21 @@ package model
 type RelationshipType string
 
 const (
-	RelCONTAINS        RelationshipType = "CONTAINS"
-	RelCALLS           RelationshipType = "CALLS"
-	RelINHERITS        RelationshipType = "INHERITS"
-	RelOVERRIDES       RelationshipType = "OVERRIDES"
-	RelIMPORTS         RelationshipType = "IMPORTS"
-	RelUSES            RelationshipType = "USES"
-	RelDEFINES         RelationshipType = "DEFINES"
-	RelDECORATES       RelationshipType = "DECORATES"
-	RelIMPLEMENTS      RelationshipType = "IMPLEMENTS"
-	RelEXTENDS         RelationshipType = "EXTENDS"
-	RelHAS_METHOD      RelationshipType = "HAS_METHOD"
-	RelMEMBER_OF       RelationshipType = "MEMBER_OF"
-	RelSTEP_IN_PROCESS RelationshipType = "STEP_IN_PROCESS"
+	RelCONTAINS          RelationshipType = "CONTAINS"
+	RelCALLS             RelationshipType = "CALLS"
+	RelINHERITS          RelationshipType = "INHERITS"
+	RelOVERRIDES         RelationshipType = "OVERRIDES"
+	RelIMPORTS           RelationshipType = "IMPORTS"
+	RelUSES              RelationshipType = "USES"
+	RelDEFINES           RelationshipType = "DEFINES"
+	RelDECORATES         RelationshipType = "DECORATES"
+	RelIMPLEMENTS        RelationshipType = "IMPLEMENTS"
+	RelEXTENDS           RelationshipType = "EXTENDS"
+	RelHAS_METHOD        RelationshipType = "HAS_METHOD"
+	RelMETHOD_IMPLEMENTS RelationshipType = "METHOD_IMPLEMENTS"
+	RelDISPATCHES_TO     RelationshipType = "DISPATCHES_TO"
+	RelMEMBER_OF         RelationshipType = "MEMBER_OF"
+	RelSTEP_IN_PROCESS   RelationshipType = "STEP_IN_PROCESS"
 )
 
 // GraphRelationship represents a relationship in the knowledge graph.

@@ -25,7 +25,7 @@ var NodeTables = []NodeTableName{
 var MultiLangTypes = []NodeTableName{
 	"Struct", "Enum", "Macro", "Typedef", "Union", "Namespace", "Trait", "Impl",
 	"TypeAlias", "Const", "Static", "Property", "Record", "Delegate",
-	"Annotation", "Constructor", "Template", "Module",
+	"Annotation", "Constructor", "Template", "Module", "Package",
 }
 
 var CodeElementTypes = []NodeTableName{

@@ -16,12 +16,14 @@ var ErrSymbolNotFound = errors.New("symbol not found")
 // ErrRepoAlreadyExists indicates the repository has already been indexed
 var ErrRepoAlreadyExists = errors.New("repo already indexed")
 
+// ErrRepoBusy indicates that a repository is currently being indexed.
+var ErrRepoBusy = errors.New("repository is busy")
+
 // ErrInvalidRequest indicates an invalid request
 var ErrInvalidRequest = errors.New("invalid request")
 
 // ErrTraversalLimitExceeded indicates the traversal exceeded the maximum node visit limit
 var ErrTraversalLimitExceeded = errors.New("traversal exceeded maximum node visit limit")
-
 
 // ErrRepoNotIndexed indicates the repository has not been indexed yet
 var ErrRepoNotIndexed = errors.New("repository has not been indexed")

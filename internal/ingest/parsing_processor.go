@@ -69,7 +69,8 @@ func processParsingSequential(
 		}
 
 		// Load language
-		lang, err := registry.GetLanguage(language)
+		parserID := GetParserFromFilename(file.Path)
+		lang, err := registry.GetLanguage(parserID)
 		if err != nil {
 			continue // parser unavailable
 		}
@@ -192,10 +193,20 @@ func processMatch(
 			importPath = appendKotlinWildcard(importPath, importNode)
 		}
 		if importPath != "" {
+			namedBinding := ""
+			exportedName := ""
+			if node := captureMap["import.name"]; node != nil {
+				namedBinding = node.Utf8Text(source)
+			}
+			if node := captureMap["import.exported_name"]; node != nil {
+				exportedName = node.Utf8Text(source)
+			}
+			if language == "python" && namedBinding == "" {
+				namedBinding = exportedName
+			}
 			extracted.Imports = append(extracted.Imports, ExtractedImport{
-				FilePath:   filePath,
-				ImportPath: importPath,
-				Language:   language,
+				FilePath: filePath, ImportPath: importPath, Language: language,
+				NamedBinding: namedBinding, ExportedName: exportedName,
 			})
 		}
 		return
@@ -226,6 +237,12 @@ func processMatch(
 		receiverTypeName := ""
 		if callForm == CallFormMember && receiverName != "" {
 			receiverTypeName = LookupTypeEnv(typeEnv, receiverName, callNode, source)
+			if language == "swift" && receiverName == "Self" && receiverTypeName == "" {
+				receiverTypeName = InferSwiftSelfType(callNode, source)
+			}
+			if language == "swift" && receiverTypeName == "" {
+				receiverTypeName = InferSwiftGenericReceiverType(callNode, receiverName, source)
+			}
 		}
 		// Kotlin permits values with operator fun invoke to use function-call
 		// syntax. A typed local/parameter named queryBuilder in queryBuilder { }
@@ -320,6 +337,28 @@ func processMatch(
 
 	// Get definition node for range
 	definitionNode := GetDefinitionNodeFromCaptures(captureMap)
+	if language == "rust" && definitionNode != nil && definitionNode.Kind() == "function_item" {
+		for current := definitionNode.Parent(); current != nil; current = current.Parent() {
+			if current.Kind() == "impl_item" || current.Kind() == "trait_item" {
+				nodeLabel = graph.LabelMethod
+				break
+			}
+		}
+	}
+	if language == "swift" && definitionNode != nil && definitionNode.Kind() == "function_declaration" {
+		for current := definitionNode.Parent(); current != nil; current = current.Parent() {
+			if current.Kind() == "class_declaration" || current.Kind() == "protocol_declaration" {
+				nodeLabel = graph.LabelMethod
+				break
+			}
+		}
+	}
+	if (language == "typescript" || language == "javascript") && definitionNode != nil && definitionNode.Kind() == "method_definition" && nodeName == "constructor" {
+		nodeLabel = graph.LabelConstructor
+	}
+	if language == "php" && definitionNode != nil && definitionNode.Kind() == "method_declaration" && nodeName == "__construct" {
+		nodeLabel = graph.LabelConstructor
+	}
 	if language == "cpp" && definitionNode != nil && definitionNode.Kind() == "field_declaration_list" && nameNode != nil {
 		for current := nameNode.Parent(); current != nil && current != definitionNode; current = current.Parent() {
 			if current.Kind() == "function_definition" {
@@ -411,6 +450,21 @@ func processMatch(
 			nodeLabel = graph.LabelConstructor
 		}
 	}
+	if language == "swift" && nodeLabel == graph.LabelConstructor && enclosingClassId != "" {
+		if idx := strings.LastIndex(enclosingClassId, ":"); idx >= 0 {
+			nodeName = enclosingClassId[idx+1:]
+		}
+	}
+	if (language == "typescript" || language == "javascript") && nodeLabel == graph.LabelConstructor && enclosingClassId != "" {
+		if idx := strings.LastIndex(enclosingClassId, ":"); idx >= 0 {
+			nodeName = enclosingClassId[idx+1:]
+		}
+	}
+	if language == "php" && nodeLabel == graph.LabelConstructor && enclosingClassId != "" {
+		if idx := strings.LastIndex(enclosingClassId, ":"); idx >= 0 {
+			nodeName = enclosingClassId[idx+1:]
+		}
+	}
 
 	// Direct-owner identity prevents same-name methods in one file from
 	// collapsing into a single graph node.
@@ -437,6 +491,20 @@ func processMatch(
 			Language:   language,
 			IsExported: &isExpBool,
 		},
+	}
+	if language == "csharp" && definitionNode != nil && nodeLabel == graph.LabelMethod {
+		declaration := definitionNode.Utf8Text(source)
+		if body := strings.Index(declaration, "{"); body >= 0 {
+			declaration = declaration[:body]
+		}
+		var modifiers []string
+		if regexp.MustCompile(`\boverride\b`).MatchString(declaration) {
+			modifiers = append(modifiers, "override")
+		}
+		if regexp.MustCompile(`\bstatic\b`).MatchString(declaration) {
+			modifiers = append(modifiers, "static")
+		}
+		node.Properties.Modifiers = strings.Join(modifiers, " ")
 	}
 	if methodSig != nil {
 		node.Properties.ParameterCount = methodSig.ParameterCount

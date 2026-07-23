@@ -3,7 +3,7 @@ package ingest
 // Language loader — registers go-tree-sitter Language objects for each supported language.
 // Uses CGO-based grammar bindings from tree-sitter-*-go packages.
 // Covers all supported parsers (Go, JavaScript/JSX, TypeScript/TSX, Python,
-// Java, C, C++, C#, Rust, Ruby, PHP, Kotlin, and Swift).
+// Java, C, C++, C#, Rust, PHP, Kotlin, and Swift).
 
 import (
 	"fmt"
@@ -21,7 +21,6 @@ import (
 	tree_sitter_javascript "github.com/tree-sitter/tree-sitter-javascript/bindings/go"
 	tree_sitter_php "github.com/tree-sitter/tree-sitter-php/bindings/go"
 	tree_sitter_python "github.com/tree-sitter/tree-sitter-python/bindings/go"
-	tree_sitter_ruby "github.com/tree-sitter/tree-sitter-ruby/bindings/go"
 	tree_sitter_rust "github.com/tree-sitter/tree-sitter-rust/bindings/go"
 	tree_sitter_typescript "github.com/tree-sitter/tree-sitter-typescript/bindings/go"
 )
@@ -90,8 +89,6 @@ func (r *LanguageRegistry) loadLanguage(langID string) (*sitter.Language, error)
 		ptr = tree_sitter_c_sharp.Language()
 	case "rust":
 		ptr = tree_sitter_rust.Language()
-	case "ruby":
-		ptr = tree_sitter_ruby.Language()
 	case "php":
 		ptr = tree_sitter_php.LanguagePHP()
 	case "kotlin":
@@ -109,15 +106,15 @@ func (r *LanguageRegistry) loadLanguage(langID string) (*sitter.Language, error)
 	return lang, nil
 }
 
-// SupportedLanguageIDs returns the list of language IDs that have go-tree-sitter bindings.
-func (r *LanguageRegistry) SupportedLanguageIDs() []string {
-	return []string{"go", "javascript", "typescript", "tsx", "python", "java", "c", "cpp", "csharp", "rust", "ruby", "php", "kotlin", "swift"}
+// SupportedParserIDs returns grammar identifiers, including internal dialects.
+func (r *LanguageRegistry) SupportedParserIDs() []string {
+	return []string{"go", "javascript", "typescript", "tsx", "python", "java", "c", "cpp", "csharp", "rust", "php", "kotlin", "swift"}
 }
 
-// HasBinding returns true if the language ID has a go-tree-sitter binding.
-func (r *LanguageRegistry) HasBinding(langID string) bool {
+// HasParser returns true if the parser or dialect has a tree-sitter binding.
+func (r *LanguageRegistry) HasParser(langID string) bool {
 	switch langID {
-	case "go", "javascript", "typescript", "tsx", "python", "java", "c", "cpp", "csharp", "rust", "ruby", "php", "kotlin", "swift":
+	case "go", "javascript", "typescript", "tsx", "python", "java", "c", "cpp", "csharp", "rust", "php", "kotlin", "swift":
 		return true
 	default:
 		return false

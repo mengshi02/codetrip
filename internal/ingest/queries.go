@@ -71,6 +71,9 @@ const TypeScriptQueries = `
 (method_definition
   name: (property_identifier) @name) @definition.method
 
+(method_signature
+  name: (property_identifier) @name) @definition.method
+
 (lexical_declaration
   (variable_declarator
     name: (identifier) @name
@@ -188,10 +191,19 @@ const PythonQueries = `
   name: (dotted_name) @import.source) @import
 
 (import_from_statement
-  module_name: (dotted_name) @import.source) @import
+  module_name: [(dotted_name) (relative_import)] @import.source
+  name: (dotted_name
+    (identifier) @import.exported_name @import.name)) @import
 
 (import_from_statement
-  module_name: (relative_import) @import.source) @import
+  module_name: [(dotted_name) (relative_import)] @import.source
+  name: (aliased_import
+    name: (dotted_name (identifier) @import.exported_name)
+    alias: (identifier) @import.name)) @import
+
+(import_from_statement
+  module_name: [(dotted_name) (relative_import)] @import.source
+  (wildcard_import)) @import
 
 (call
   function: (identifier) @call.name) @call
@@ -204,6 +216,12 @@ const PythonQueries = `
   name: (identifier) @heritage.class
   superclasses: (argument_list
     (identifier) @heritage.extends)) @heritage
+
+(class_definition
+  name: (identifier) @heritage.class
+  superclasses: (argument_list
+    (attribute
+      attribute: (identifier) @heritage.extends))) @heritage
 `
 
 const JavaQueries = `
@@ -402,6 +420,7 @@ const CSharpQueries = `
 (invocation_expression function: (member_access_expression name: (identifier) @call.name)) @call
 
 (object_creation_expression type: (identifier) @call.name) @call
+(object_creation_expression type: (generic_name (identifier) @call.name)) @call
 
 (variable_declaration type: (identifier) @call.name (variable_declarator (implicit_object_creation_expression) @call))
 
@@ -413,6 +432,8 @@ const CSharpQueries = `
 
 const RustQueries = `
 (function_item name: (identifier) @name) @definition.function
+(trait_item body: (declaration_list
+  (function_signature_item name: (identifier) @name) @definition.method))
 (struct_item name: (type_identifier) @name) @definition.struct
 (enum_item name: (type_identifier) @name) @definition.enum
 (trait_item name: (type_identifier) @name) @definition.trait
@@ -580,6 +601,8 @@ const SwiftQueries = `
 
 (protocol_function_declaration name: (simple_identifier) @name) @definition.method
 
+(init_declaration) @definition.constructor
+
 (property_declaration (pattern (simple_identifier) @name)) @definition.property
 
 (import_declaration (identifier (simple_identifier) @import.source)) @import
@@ -638,10 +661,19 @@ const PythonImportQuery = `
   name: (dotted_name) @import.path) @import
 
 (import_from_statement
-  module_name: (dotted_name) @import.path) @import
+  module_name: [(dotted_name) (relative_import)] @import.path
+  name: (dotted_name
+    (identifier) @import.exported_name @import.name)) @import.named
 
 (import_from_statement
-  module_name: (relative_import) @import.path) @import
+  module_name: [(dotted_name) (relative_import)] @import.path
+  name: (aliased_import
+    name: (dotted_name (identifier) @import.exported_name)
+    alias: (identifier) @import.name)) @import.named
+
+(import_from_statement
+  module_name: [(dotted_name) (relative_import)] @import.path
+  (wildcard_import)) @import
 `
 
 const GoImportQuery = `

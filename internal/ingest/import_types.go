@@ -49,10 +49,12 @@ func (pm PackageMap) AddPackage(filePath, dirSuffix string) {
 
 // ExtractedImport represents a single import captured during parsing.
 type ExtractedImport struct {
-	FilePath   string
-	ImportPath string
-	Language   string
-	ImportNode string // serialized AST node info for named binding extraction
+	FilePath     string
+	ImportPath   string
+	Language     string
+	NamedBinding string
+	ExportedName string
+	ImportNode   string // serialized AST node info for named binding extraction
 }
 
 // ExtractedCall represents a single call captured during parsing.

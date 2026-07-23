@@ -3,6 +3,7 @@ package ingest
 import (
 	"log"
 	"regexp"
+	"strings"
 
 	graph "github.com/mengshi02/codetrip/internal/model"
 	sitter "github.com/tree-sitter/go-tree-sitter"
@@ -41,17 +42,45 @@ func isHeritageTypeDefinition(definition *SymbolDefinition) bool {
 // inheritance endpoints. Constructors commonly share the class name and may
 // overwrite the compatibility file index, but can never be an EXTENDS node.
 func resolveHeritageDefinition(name, filePath string, ctx *ResolveContext) *SymbolDefinition {
+	return resolveHeritageDefinitionExcluding(name, filePath, "", ctx)
+}
+
+func resolveHeritageDefinitionExcluding(name, filePath, excludedNodeID string, ctx *ResolveContext) *SymbolDefinition {
 	for _, definition := range ctx.SymbolTable.LookupFuzzy(name) {
-		if definition.FilePath == filePath && isHeritageTypeDefinition(definition) {
+		if definition.NodeID != excludedNodeID && definition.FilePath == filePath && isHeritageTypeDefinition(definition) {
 			return definition
 		}
 	}
+	var candidates []*SymbolDefinition
 	for _, definition := range visibleTypeDefinitions(name, filePath, ctx) {
-		if isHeritageTypeDefinition(definition) {
-			return definition
+		if definition.NodeID != excludedNodeID && isHeritageTypeDefinition(definition) {
+			candidates = append(candidates, definition)
 		}
 	}
-	return nil
+	if len(candidates) == 1 {
+		return candidates[0]
+	}
+	// C# partial types may produce multiple physical declarations. The primary
+	// declaration conventionally sits at the shallowest path while fragments
+	// live in feature subdirectories. Use it only when the shallowest candidate
+	// is unique; otherwise keep the relation unresolved instead of guessing.
+	var shallowest *SymbolDefinition
+	minDepth := int(^uint(0) >> 1)
+	tied := false
+	for _, candidate := range candidates {
+		depth := strings.Count(candidate.FilePath, "/")
+		if depth < minDepth {
+			minDepth = depth
+			shallowest = candidate
+			tied = false
+		} else if depth == minDepth {
+			tied = true
+		}
+	}
+	if tied {
+		return nil
+	}
+	return shallowest
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -363,15 +392,15 @@ func ProcessHeritageFromExtracted(
 				childID = resolved.NodeID
 			}
 			if childID == "" {
-				childID = makeFallbackID("Class", h.FilePath+":"+h.ChildID)
+				continue
 			}
 
 			parentID := ""
-			if resolved := resolveHeritageDefinition(h.ParentName, h.FilePath, ctx); resolved != nil {
+			if resolved := resolveHeritageDefinitionExcluding(h.ParentName, h.FilePath, childID, ctx); resolved != nil {
 				parentID = resolved.NodeID
 			}
 			if parentID == "" {
-				parentID = makeFallbackID(ext.IDPrefix, h.ParentName)
+				continue
 			}
 
 			if childID != "" && parentID != "" && childID != parentID {
@@ -391,15 +420,15 @@ func ProcessHeritageFromExtracted(
 				classID = resolved.NodeID
 			}
 			if classID == "" {
-				classID = makeFallbackID("Class", h.FilePath+":"+h.ChildID)
+				continue
 			}
 
 			interfaceID := ""
-			if resolved := resolveHeritageDefinition(h.ParentName, h.FilePath, ctx); resolved != nil {
+			if resolved := resolveHeritageDefinitionExcluding(h.ParentName, h.FilePath, classID, ctx); resolved != nil {
 				interfaceID = resolved.NodeID
 			}
 			if interfaceID == "" {
-				interfaceID = makeFallbackID("Interface", h.ParentName)
+				continue
 			}
 
 			if classID != "" && interfaceID != "" {
@@ -413,38 +442,21 @@ func ProcessHeritageFromExtracted(
 				})
 			}
 		} else if h.HeritageType == "trait-impl" {
-			structID := symbolTable.LookupExact(h.FilePath, h.ChildID)
-			if structID == "" {
-				ctx := &ResolveContext{
-					SymbolTable:    symbolTable,
-					NamedImportMap: nim,
-					ImportMap:      im,
-					PackageMap:     pm,
-				}
-				resolved := ResolveSymbol(h.ChildID, h.FilePath, ctx)
-				if resolved != nil && resolved.Definition != nil {
-					structID = resolved.Definition.NodeID
-				}
+			ctx := &ResolveContext{SymbolTable: symbolTable, NamedImportMap: nim, ImportMap: im, PackageMap: pm}
+			structID := ""
+			if resolved := resolveHeritageDefinition(h.ChildID, h.FilePath, ctx); resolved != nil {
+				structID = resolved.NodeID
 			}
 			if structID == "" {
-				structID = makeFallbackID("Struct", h.FilePath+":"+h.ChildID)
+				continue
 			}
 
 			traitID := ""
-			{
-				ctx := &ResolveContext{
-					SymbolTable:    symbolTable,
-					NamedImportMap: nim,
-					ImportMap:      im,
-					PackageMap:     pm,
-				}
-				resolved := ResolveSymbol(h.ParentName, h.FilePath, ctx)
-				if resolved != nil && resolved.Definition != nil {
-					traitID = resolved.Definition.NodeID
-				}
+			if resolved := resolveHeritageDefinitionExcluding(h.ParentName, h.FilePath, structID, ctx); resolved != nil {
+				traitID = resolved.NodeID
 			}
 			if traitID == "" {
-				traitID = makeFallbackID("Trait", h.ParentName)
+				continue
 			}
 
 			if structID != "" && traitID != "" {
