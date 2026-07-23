@@ -5,15 +5,70 @@ All notable changes to codetrip will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.2.0] - 2026-07-20
+## [0.2.0] - 2026-07-23
 
-- Unified production-grade multi-language ingest pipeline.
-- Typed graph persistence with repository isolation, adjacency indexes, caches, BFS, and shortest path.
-- Atomic complete-snapshot replacement and retired-snapshot cleanup.
-- Symbol, source, semantic, and hybrid retrieval.
-- Optional parser-inspection CSV and complete persisted-graph CSV export.
-- Public Go library for indexing, retrieval, traversal, embedding, export, metrics, and repository management.
-- Single-word CLI commands and graph-backed stdio MCP tools.
+### Added
+
+- Production semantic analysis for Go, Java, Kotlin, C#, Python, Rust, Swift,
+  TypeScript/TSX, JavaScript/JSX, PHP, C, and C++.
+- Typed `CALLS`, `EXTENDS`, `IMPLEMENTS`, `OVERRIDES`,
+  `METHOD_IMPLEMENTS`, and `DISPATCHES_TO` relationships with cross-file
+  resolution.
+- Repository-scoped symbol search, source search, semantic vectors, hybrid
+  retrieval, bounded graph traversal, and shortest paths.
+- `code`, `docs`, and `all` source-search scopes.
+- `context` symbol intelligence with source excerpts and typed direct
+  relationships.
+- `impact` reverse semantic dependency analysis with depth, confidence, and
+  relationship details.
+- `check` graph integrity, inheritance-cycle, import-cycle, and optional
+  low-confidence relationship analysis.
+- `diff` Git changed-line mapping to persisted symbols with aggregated impact
+  and change causes.
+- Non-mutating `rename` planning with identifier validation, conflict
+  detection, semantic references, and exact textual candidates.
+- Deterministic parser-inspection CSV and complete persisted-graph CSV export.
+- Public Go `Engine` APIs for all supported library capabilities.
+- Single-word CLI commands and matching stdio MCP tools.
+
+### Changed
+
+- Rebuilt ingestion around one production analysis path shared by the Go
+  library, CLI, and MCP.
+- Isolated graph, symbol, source, and vector data per repository.
+- Repository replacement now builds and atomically publishes a complete
+  snapshot before retiring the previous snapshot.
+- MCP is hosted by the CLI adapter and invokes only public `Engine` methods.
+- Traversal results now include edges, relationship types, directions,
+  confidence, and resolution reasons.
+- Source search defaults to code and engineering configuration instead of
+  unrestricted repository text.
+- Updated README architecture diagram and English and Chinese user guides for
+  the current engine capabilities.
+
+### Fixed
+
+- Improved cross-file calls, interface implementations, inheritance, and
+  method override resolution across all supported languages.
+- Restored PHP Composer namespace, inheritance, implementation, override, and
+  call resolution on large framework repositories.
+- Fixed Go interface method sets and cross-file call chains.
+- Fixed C# generic inheritance and explicit override handling.
+- Fixed Python named imports and default-argument calls, Rust workspace
+  imports, Swift package visibility and generic constraints, and C/C++ symbol
+  resolution.
+- Removed dangling community memberships, self imports, invalid self semantic
+  relationships, and relationships with missing endpoints.
+- Prevented one repository from locking unrelated repository data.
+- Added a portable Windows source-search backend while preserving the public
+  search behavior.
+
+### Removed
+
+- Removed the obsolete community, ingestion, route, wiki, group, collection,
+  and incremental-index implementations replaced by the production engine.
+- Removed analysis-mode branching; language tuning now uses the single
+  production path and optional local CSV validation.
 
 
 ## [0.1.0] - 2026-06-20
