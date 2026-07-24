@@ -39,7 +39,7 @@ trash/           中断删除的清理目录
 | `path` | 查找最短有向路径 |
 | `export` | 将持久化图导出为 CSV |
 | `list` | 列出活动逻辑仓库 |
-| `mcp` | 启动 stdio MCP 服务 |
+| `mcp` | 启动 stdio MCP 服务或配置受支持的 Agent 客户端 |
 | `version` | 输出构建版本 |
 
 ### 索引与完整替换
@@ -250,6 +250,24 @@ manifest, err := engine.ExportFullCSV("project", "./exports/project")
 Go LIB 只暴露领域请求和结果类型，不公开内部存储及索引实现。
 
 ## MCP
+
+自动检测并配置当前机器上已安装的受支持客户端：
+
+```bash
+codetrip mcp setup
+```
+
+支持的目标为 `codex`、`claude`、`cursor`、`vscode` 和 `copilot`。可以显式指定一个或多个目标，使用 `--dry-run` 预览改动；只有需要替换已有 Codetrip 配置时才使用 `--force`：
+
+```bash
+codetrip mcp setup codex cursor
+codetrip mcp setup --dry-run
+codetrip mcp setup claude --force
+```
+
+setup 命令会保留其他 MCP server。Cursor 的 JSON 配置采用原子合并写入，并在修改前创建备份；其他客户端通过各自的官方命令行接口配置。
+
+直接启动 stdio 服务：
 
 ```bash
 codetrip mcp --dir ~/.codetrip

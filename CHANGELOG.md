@@ -5,6 +5,18 @@ All notable changes to codetrip will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.1] - 2026-07-24
+
+### Added
+
+- Added `codetrip mcp setup` for one-command integration with Codex, Claude Code, Cursor, VS Code/Copilot, and GitHub Copilot CLI.
+- Added automatic client detection, `--dry-run`, targeted client setup, guarded replacement, and Cursor configuration backup.
+
+### Changed
+
+- Improved README onboarding around coding-agent workflows and MCP setup.
+
+
 ## [0.2.0] - 2026-07-23
 
 ### Added
@@ -30,6 +42,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Deterministic parser-inspection CSV and complete persisted-graph CSV export.
 - Public Go `Engine` APIs for all supported library capabilities.
 - Single-word CLI commands and matching stdio MCP tools.
+- One-command MCP setup for Codex, Claude Code, Cursor, VS Code/Copilot, and
+  GitHub Copilot CLI, with client detection, dry-run, and guarded replacement.
 
 ### Changed
 

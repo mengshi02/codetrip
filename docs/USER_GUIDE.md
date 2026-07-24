@@ -39,7 +39,7 @@ All business commands are single words:
 | `path` | Find a shortest directed path |
 | `export` | Export the persisted graph as CSV |
 | `list` | List active logical repositories |
-| `mcp` | Start the stdio MCP server |
+| `mcp` | Start the stdio MCP server or configure supported agent clients |
 | `version` | Print the build version |
 
 ### Index and replace
@@ -278,6 +278,29 @@ manifest, err := engine.ExportFullCSV("project", "./exports/project")
 The Go API exposes domain request/result types. Internal storage and index implementations are intentionally not public.
 
 ## MCP
+
+Configure every supported client detected on the current machine:
+
+```bash
+codetrip mcp setup
+```
+
+Supported targets are `codex`, `claude`, `cursor`, `vscode`, and `copilot`.
+Pass one or more targets explicitly, use `--dry-run` to inspect the planned
+changes, and use `--force` only when an existing Codetrip entry should be
+replaced:
+
+```bash
+codetrip mcp setup codex cursor
+codetrip mcp setup --dry-run
+codetrip mcp setup claude --force
+```
+
+The setup command preserves unrelated MCP servers. Cursor's JSON configuration
+is merged atomically and backed up before modification. The other clients are
+configured through their official command-line interfaces.
+
+To start the stdio server directly:
 
 ```bash
 codetrip mcp --dir ~/.codetrip

@@ -48,7 +48,7 @@ func (access *engineAccess) use(ctx context.Context, operation func(*codetrip.En
 }
 
 func newMCPCmd(flags *cliFlags) *cobra.Command {
-	return &cobra.Command{
+	command := &cobra.Command{
 		Use: "mcp", Short: "Start the codetrip MCP server", Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			dir, err := flags.resolvedTripDir()
@@ -61,6 +61,8 @@ func newMCPCmd(flags *cliFlags) *cobra.Command {
 			return newMCPServer(access).Run(cmd.Context(), &protocol.StdioTransport{})
 		},
 	}
+	command.AddCommand(newMCPSetupCmd(flags))
+	return command
 }
 
 func newMCPServer(access *engineAccess) *protocol.Server {

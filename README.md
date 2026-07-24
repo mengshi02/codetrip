@@ -2,7 +2,15 @@
 
 **Hybrid Graph-Augmented Code Intelligence Engine**
 
-Codetrip turns a source repository into a typed code graph and combines graph traversal, lexical source search, and semantic retrieval. Use it as a Go library, a CLI, or an MCP server.
+Codetrip gives coding agents structural context that plain text search cannot: what a symbol means, who calls it, what a change can affect, and how code connects across files. It turns a repository into a typed code graph and combines graph traversal, source search, and semantic retrieval behind one Go library, CLI, and MCP server.
+
+```text
+"What calls this method?"       → impact
+"How does this request flow?"   → path
+"What changes with this diff?"  → diff
+"Can I safely rename this?"     → rename
+"Is the graph structurally OK?" → check
+```
 
 ## How It Works
 
@@ -44,28 +52,23 @@ git clone https://github.com/mengshi02/codetrip.git
 cd codetrip && make build
 ```
 
-### Index and Search
+### Index and Connect Your Agent
 
 ```bash
 codetrip index /path/to/project --repo project
-
-codetrip search "ParseConfig" --repo project
-codetrip source 'lang:go ParseConfig' --repo project
-codetrip source 'architecture' --repo project --scope docs
-
-# Remove the repository and every persisted snapshot.
-codetrip delete project
+codetrip mcp setup
 ```
 
-### Explore the Graph
+`mcp setup` detects installed clients and configures Codex, Claude Code, Cursor, VS Code/Copilot, and GitHub Copilot CLI. Preview changes with `--dry-run`, target one client with `codetrip mcp setup codex`, or use `--force` to replace an existing Codetrip entry.
+
+### Search and Understand
 
 ```bash
+codetrip search "ParseConfig" --repo project
+codetrip source 'lang:go ParseConfig' --repo project
 codetrip context NODE_ID --repo project
 codetrip impact NODE_ID --repo project --depth 3
-codetrip check --repo project
 codetrip diff HEAD~1 --target HEAD --repo project
-codetrip rename NODE_ID NewName --repo project
-codetrip traverse NODE_ID --repo project --direction both --depth 3
 codetrip path SOURCE_ID TARGET_ID --repo project
 ```
 
@@ -140,6 +143,24 @@ rename, err := engine.Rename(ctx, &codetrip.RenameRequest{
 The public API also provides source search, embedding, hybrid search, context, impact analysis, traversal, shortest paths, repository listing, CSV export, metrics, and configuration options.
 
 ## MCP
+
+Install Codetrip into every detected supported client:
+
+```bash
+codetrip mcp setup
+```
+
+Or configure clients explicitly:
+
+```bash
+codetrip mcp setup codex claude cursor vscode copilot
+codetrip mcp setup --dry-run
+codetrip mcp setup codex --force
+```
+
+The generated configuration launches the current Codetrip executable and uses the resolved data directory. Existing unrelated MCP servers are preserved; Cursor configuration is backed up before it is changed.
+
+To run the stdio server directly:
 
 ```bash
 codetrip mcp --dir ~/.codetrip
